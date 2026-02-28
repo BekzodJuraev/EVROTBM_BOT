@@ -132,3 +132,46 @@ async def choosing_language(message):
         lang = "uz"
 
         await message.answer("O'zbek tili tanlandi. Xush kelibsiz! 👋",reply_markup=get_main_menu_kb("uz"))
+
+
+def get_summary_text(category, quantity, lang, product=None, distance=None):
+    config = CATEGORIES_CONFIG.get(category, CATEGORIES_CONFIG["beton"])
+
+    tovar_name = config[f"tovar_{lang}"]
+    unit = config[f"unit_{lang}"]
+    label = config[f"label_{lang}"]
+    emoji = config["emoji"]
+
+    # Собираем начало сообщения
+    if lang == "ru":
+        lines = [
+            f"📝 **Ваш выбор:**",
+            f"━━━━━━━━━━━━━━",
+            f"{emoji} **Товар:** {tovar_name}",
+            f"🏗 **{label}:** `{product}`",
+            f"🔢 **Количество:** `{quantity} {unit}`"
+        ]
+        # Добавляем дистанцию, только если она нужна этой категории
+        if config["has_distance"]:
+            lines.append(f"🚚 **Дистанция:** `{distance} км` ")
+
+        lines.append(f"━━━━━━━━━━━━━━")
+        summary = "\n".join(lines)
+        choose_text = "Выберите действие:"
+
+    else:
+        lines = [
+            f"📝 **Sizning tanlovingiz:**",
+            f"━━━━━━━━━━━━━━",
+            f"{emoji} **Mahsulot:** {tovar_name}",
+            f"🏗 **{label}:** `{product}`",
+            f"🔢 **Miqdori:** `{quantity} {unit}`"
+        ]
+        if config["has_distance"]:
+            lines.append(f"🚚 **Masofa:** `{distance} km` ")
+
+        lines.append(f"━━━━━━━━━━━━━━")
+        summary = "\n".join(lines)
+        choose_text = "Harakatni tanlang:"
+
+    return summary, choose_text

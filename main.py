@@ -286,29 +286,12 @@ async def process_quantity_order(message: types.Message, state: FSMContext):
 
     await state.update_data(quantity=quantity)
 
-    if lang == "ru":
-        summary = (
-            f"📝 **Ваш выбор:**\n"
-             f"🏗 **Товар:** {category}\n"
-            f"🏗 Марка: `{product}`\n"
-            f"🔢 Количество: `{quantity_or_unit(lang,category,quantity)}`\n"  # Добавили количество
-            f"🚚 Дистанция: `{distance} км`\n\n"
-        )
-        choose_text = "Выбрать другой вариант или вернуться:"
-    else:
-        summary = (
-            f"📝 **Sizning tanlovingiz:**\n"
-            f"🏗 **Mahsulot:** {category}\n"
-            f"🏗 Marka: `{product}`\n"
-            f"🔢 Miqdori: `{quantity_or_unit(lang,category,quantity)}`\n"  # Добавили количество
-            f"🚚 Masofa: `{distance} km`\n\n"
-        )
-        choose_text = "Boshqa variantni tanlash yoki orqaga qaytish:"
+    summary, text=get_summary_text(category=category,quantity=quantity,lang=lang,product=product,distance=distance)
 
     await message.answer(summary, reply_markup=get_calculate_inline(lang))
 
     # 2. Сразу отправляем обычную клавиатуру (выбора марок), чтобы она была внизу
-    await message.answer(choose_text, reply_markup=get_beton_keyboard(lang))
+    await message.answer(text, reply_markup=get_beton_keyboard(lang))
 
     # Возвращаем стейт в режим выбора (чтобы кнопки марок снова работали)
     await state.set_state(OrderSteps.making_order)
@@ -351,7 +334,7 @@ async def set_product_category(message: types.Message, state: FSMContext):
     # Логика для БЕТОНА
     if "Бетон" in choice or "Beton" in choice:
         await state.update_data(product="beton")
-        await state.set_state(OrderSteps.making_order)  # Стейт выбора марки
+        await state.set_state(OrderSteps.making_order)
 
         text = "🏗 **Выберите марку бетона:**" if lang == "ru" else "🏗 **Beton markasini tanlang:**"
         kb = get_beton_keyboard(lang)
@@ -359,12 +342,16 @@ async def set_product_category(message: types.Message, state: FSMContext):
     # Логика для ФБС
     elif "ФБС" in choice or "FBS" in choice:
         await state.update_data(product="fbs")
-        await state.set_state(OrderSteps.making_order)  # Можно использовать тот же стейт
+        await state.set_state(OrderSteps.quantity_order)  # Можно использовать тот же стейт
 
         text = "🧱 **Выберите тип ФБС блока:**" if lang == "ru" else "🧱 **FBS blok turini tanlang:**"
-        kb = get_fbs_keyboard(lang)  # Твоя функция для кнопок ФБС
+        kb = get_fbs_keyboard(lang)
 
-    # Если ввели что-то другое
+    # # Если ввели что-то другое
+    # elif "Лотки" in choice or "Lotoklar":
+    #     await state.update_data(product="lotok")
+    #     await state.set_state(OrderSteps.quantity_order)
+
     else:
         error_text = "Пожалуйста, выберите категорию из меню 👇" if lang == "ru" else "Iltimos, menyudan tanlang 👇"
         await message.answer(error_text)

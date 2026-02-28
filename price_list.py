@@ -21,19 +21,25 @@ price_beton=30000
 
 CATEGORIES_CONFIG = {
     "fbs": {
+        "tovar_ru": "ФБС Блоки",
+        "tovar_uz": "FBS Bloklar",
         "unit_ru": "шт",
         "unit_uz": "dona",
         "emoji": "🧱",
         "label_ru": "Тип блока",
         "label_uz": "Blok turi",
-        "price_dict": fbs_prices  # Your dictionary with FBS prices
+        "has_distance": False,  # Дистанция НЕ нужна
+        "price_dict": fbs_prices
     },
     "beton": {
+        "tovar_ru": "Бетон",
+        "tovar_uz": "Beton",
         "unit_ru": "м³",
         "unit_uz": "m³",
         "emoji": "💧",
         "label_ru": "Марка",
         "label_uz": "Markasi",
-        "price_dict": beton  # Your dictionary with Beton prices
+        "has_distance": True,   # Дистанция НУЖНА
+        "price_dict": beton
     }
 }
