@@ -29,7 +29,8 @@ CATEGORIES_CONFIG = {
         "label_ru": "Тип блока",
         "label_uz": "Blok turi",
         "has_distance": False,  # Дистанция НЕ нужна
-        "price_dict": fbs_prices
+        "price_dict": fbs_prices,
+
     },
     "beton": {
         "tovar_ru": "Бетон",
@@ -41,5 +42,16 @@ CATEGORIES_CONFIG = {
         "label_uz": "Markasi",
         "has_distance": True,   # Дистанция НУЖНА
         "price_dict": beton
+    },
+    "lotok": {
+        "tovar_ru": "Лотки",
+        "tovar_uz": "Lotoklar",
+        "unit_ru": "шт",
+        "unit_uz": "dona",
+        "emoji": "〰️",
+        "label_ru": "Размер лотка",
+        "label_uz": "Lotok o'lchami",
+        "has_distance": False,   # Если нужна дистанция - True, если нет - False
+        "price_dict": None # Не забудь создать этот словарь с ценами
     }
 }

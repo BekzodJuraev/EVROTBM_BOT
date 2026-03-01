@@ -28,6 +28,7 @@ class OrderSteps(StatesGroup):
 
 @dp.message(F.text.in_({"⬅️ Назад", "⬅️ Orqaga"}))
 async def go_back(message: types.Message, state: FSMContext):
+
     current_state = await state.get_state()
     user_data = await state.get_data()
     lang = user_data.get("user_lang", "ru")
@@ -41,9 +42,12 @@ async def go_back(message: types.Message, state: FSMContext):
     elif current_state == OrderSteps.main_category:
         await state.set_state(OrderSteps.main_menu)
 
+
+
         await message.answer("Возвращаемся в меню..." if lang == "ru" else "Menyuga qaytamiz...", reply_markup=get_main_menu_kb(lang))
 
     elif current_state == OrderSteps.making_order:
+
         await state.set_state(OrderSteps.main_category)
         await message.answer("Возвращаемся в меню..." if lang == "ru" else "Menyuga qaytamiz...",
                              reply_markup=get_cat_menu(lang))
@@ -190,7 +194,7 @@ async def final_calculation(callback: types.CallbackQuery, state: FSMContext):
 
         current_delivery = price_beton
     else:
-        # После 15 км: 30000 + (лишние км * 1800)
+
         extra_km = dist - distance_from
         current_delivery = price_beton + (extra_km * price_distance)
 
@@ -256,7 +260,7 @@ async def process_distance_manual(message: types.Message, state: FSMContext):
     if 1 <= distance <= 70:
         await state.update_data(distance=distance)
         await state.set_state(OrderSteps.quantity_order)
-        text = "🔢 Введите необходимое количество:" if lang == "ru" else "🔢 Kerakli miqdorni kiriting:"
+        text = get_quantity_text(lang)
         sent_msg = await message.answer(text)
 
 
@@ -290,10 +294,10 @@ async def process_quantity_order(message: types.Message, state: FSMContext):
 
     await message.answer(summary, reply_markup=get_calculate_inline(lang))
 
-    # 2. Сразу отправляем обычную клавиатуру (выбора марок), чтобы она была внизу
+
     await message.answer(text, reply_markup=get_beton_keyboard(lang))
 
-    # Возвращаем стейт в режим выбора (чтобы кнопки марок снова работали)
+
     await state.set_state(OrderSteps.making_order)
 
 
@@ -308,18 +312,20 @@ async def process_beton_mark(message: types.Message, state: FSMContext):
 
     user_data = await state.get_data()
     lang = user_data.get("user_lang", "ru")
+    category = user_data.get("product")
 
-    await state.set_state(OrderSteps.entering_distance)
+    # Get configuration for this category
+    config = CATEGORIES_CONFIG.get(category)
 
-
-    if lang == "ru":
-        text = (f"✅ Вы выбрали: **{message.text}**\n\n"
-                f"🚚 Введите расстояние доставки вручную (от 1 до 70 км):")
+    # DRY LOGIC: Check if this category needs distance
+    if config.get("has_distance"):
+        await state.set_state(OrderSteps.entering_distance)
+        text = making_order_beton(lang, message.text)  # Specific text for distance
     else:
-        text = (f"✅ Siz **{message.text}** ni tanladingiz.\n\n"
-                f"🚚 Yetkazib berish masofasini qo'lda kiriting (1 dan 70 km gacha):")
+        # For FBS, Lotok, and anything else without distance
+        await state.set_state(OrderSteps.quantity_order)
+        text = get_quantity_text(lang)  # Generic "Enter quantity" text
 
-    # ReplyKeyboardRemove убирает кнопки марок, чтобы было удобно писать
     await message.answer(text, reply_markup=types.ReplyKeyboardRemove())
 
 
@@ -328,10 +334,11 @@ async def set_product_category(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     lang = user_data.get("user_lang", "ru")
 
-    # 1. Определяем, что выбрал юзер
+
     choice = message.text
 
-    # Логика для БЕТОНА
+
+
     if "Бетон" in choice or "Beton" in choice:
         await state.update_data(product="beton")
         await state.set_state(OrderSteps.making_order)
@@ -339,28 +346,34 @@ async def set_product_category(message: types.Message, state: FSMContext):
         text = "🏗 **Выберите марку бетона:**" if lang == "ru" else "🏗 **Beton markasini tanlang:**"
         kb = get_beton_keyboard(lang)
 
-    # Логика для ФБС
+
     elif "ФБС" in choice or "FBS" in choice:
         await state.update_data(product="fbs")
-        await state.set_state(OrderSteps.quantity_order)  # Можно использовать тот же стейт
+        await state.set_state(OrderSteps.making_order)
 
         text = "🧱 **Выберите тип ФБС блока:**" if lang == "ru" else "🧱 **FBS blok turini tanlang:**"
         kb = get_fbs_keyboard(lang)
 
-    # # Если ввели что-то другое
-    # elif "Лотки" in choice or "Lotoklar":
-    #     await state.update_data(product="lotok")
-    #     await state.set_state(OrderSteps.quantity_order)
+
+
+    elif "Лотки" in choice or "Lotoklar" in choice:
+        await state.update_data(product="lotok")
+        await state.set_state(OrderSteps.quantity_order)
+        text = get_quantity_text(lang)
+        kb=None
+
+
+
 
     else:
         error_text = "Пожалуйста, выберите категорию из меню 👇" if lang == "ru" else "Iltimos, menyudan tanlang 👇"
         await message.answer(error_text)
         return
 
-    # Удаляем предыдущее сообщение (кнопки категорий), чтобы чат был чистым
-    await message.delete()
 
-    # Отправляем сообщение с нужной клавиатурой
+    #await message.delete()
+
+
     await message.answer(text, reply_markup=kb)
 
 
@@ -413,27 +426,11 @@ async def send_help(message: types.Message):
 
 
 
-@dp.message(F.text.in_({"⬅️ Назад", "⬅️ Orqaga"}))
-async def go_back(message: types.Message, state: FSMContext):
-    current_state = await state.get_state()
-    user_data = await state.get_data()
-    lang = user_data.get("user_lang", "ru")
 
-
-    if current_state == OrderSteps.main_menu:
-        await state.set_state(OrderSteps.choosing_language)
-        await message.answer("Выберите язык / Tilni tanlang", reply_markup=get_lang_kb())
-
-
-    elif current_state == OrderSteps.main_category:
-        await state.set_state(OrderSteps.main_menu)
-
-        await message.answer("Возвращаемся в меню..." if lang == "ru" else "Menyuga qaytamiz...", reply_markup=get_main_menu_kb(lang))
-
-    elif current_state == OrderSteps.making_order:
-        await state.set_state(OrderSteps.main_category)
-        await message.answer("Возвращаемся в меню..." if lang == "ru" else "Menyuga qaytamiz...",
-                             reply_markup=get_cat_menu(lang))
+    # elif current_state == OrderSteps.quantity_order:
+    #     await state.set_state(OrderSteps.main_category)
+    #     await message.answer("Возвращаемся в меню..." if lang == "ru" else "Menyuga qaytamiz...",
+    #                          reply_markup=get_cat_menu(lang))
 
     #elif current_state == OrderSteps.
 
@@ -458,7 +455,7 @@ async def cmd_start(message: types.Message):
 async def cmd_start(message: types.Message):
     await message.answer("помощь")
 
-# Запуск процесса поллинга новых апдейтов
+
 async def main():
     await dp.start_polling(bot)
 

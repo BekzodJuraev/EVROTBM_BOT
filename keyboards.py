@@ -2,6 +2,13 @@ from aiogram import Bot, Dispatcher, types,F
 from aiogram.filters.command import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from price_list import *
+
+from aiogram.filters import BaseFilter
+
+# class NotBackButton(BaseFilter):
+#     async def __call__(self, message: types.Message) -> bool:
+#         # Возвращает True, если текста НЕТ в списке кнопок "Назад"
+#         return message.text not in ["⬅️ Назад", "⬅️ Orqaga"]
 def get_lang_kb():
     kb = [[types.KeyboardButton(text="🇷🇺 Русский"), types.KeyboardButton(text="🇺🇿 O'zbek tili")]]
     return types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
@@ -151,9 +158,11 @@ def get_summary_text(category, quantity, lang, product=None, distance=None):
             f"🏗 **{label}:** `{product}`",
             f"🔢 **Количество:** `{quantity} {unit}`"
         ]
-        # Добавляем дистанцию, только если она нужна этой категории
         if config["has_distance"]:
             lines.append(f"🚚 **Дистанция:** `{distance} км` ")
+
+        if category == "lotok":
+            lines.remove(f"🏗 **{label}:** `{product}`")
 
         lines.append(f"━━━━━━━━━━━━━━")
         summary = "\n".join(lines)
@@ -170,8 +179,41 @@ def get_summary_text(category, quantity, lang, product=None, distance=None):
         if config["has_distance"]:
             lines.append(f"🚚 **Masofa:** `{distance} km` ")
 
+        if category == "lotok":
+            lines.remove(f"🏗 **{label}:** `{product}`")
+
         lines.append(f"━━━━━━━━━━━━━━")
         summary = "\n".join(lines)
         choose_text = "Harakatni tanlang:"
 
     return summary, choose_text
+
+
+def making_order_beton(lang,message):
+    if lang == "ru":
+        text = (f"✅ Вы выбрали: **{message}**\n\n"
+                f"🚚 Введите расстояние доставки вручную (от 1 до 70 км):")
+    else:
+        text = (f"✅ Siz **{message}** ni tanladingiz.\n\n"
+                f"🚚 Yetkazib berish masofasini qo'lda kiriting (1 dan 70 km gacha):")
+
+    return text
+
+
+def making_order_beton(lang, message):
+    if lang == "ru":
+        text = (f"✅ Вы выбрали: **{message}**\n\n"
+                f"🚚 Введите расстояние доставки вручную (от 1 до 70 км):")
+    else:
+        text = (f"✅ Siz **{message}** ni tanladingiz.\n\n"
+                f"🚚 Yetkazib berish masofasini qo'lda kiriting (1 dan 70 km gacha):")
+
+    return text
+
+
+def get_quantity_text(lang):
+    text="🔢 Введите необходимое количество:" if lang == "ru" else "🔢 Kerakli miqdorni kiriting:"
+    return text
+
+
+
