@@ -181,64 +181,7 @@ async def final_calculation(callback: types.CallbackQuery, state: FSMContext):
     dist = int(data.get("distance", 0))
     quantity=int(data.get("quantity",0))
 
-
-    if category == "fbs":
-        price_material = fbs_prices.get(product, 0)
-
-    else:
-        price_material = beton.get(product, 0)
-
-
-
-    if dist <= distance_from:
-
-        current_delivery = price_beton
-    else:
-
-        extra_km = dist - distance_from
-        current_delivery = price_beton + (extra_km * price_distance)
-
-    total_sum = quantity*(price_material + current_delivery)
-
-    if category == "fbs":
-        cat_emoji = "🧱"
-        prod_label = "Тип блока" if lang == "ru" else "Blok turi"
-    else:
-        cat_emoji = "💧"
-        prod_label = "Марка" if lang == "ru" else "Markasi"
-
-
-    p_mat_formatted = f"{price_material:,}".replace(",", " ")
-    p_del_formatted = f"{current_delivery:,}".replace(",", " ")
-    p_tot_formatted = f"{total_sum:,}".replace(",", " ")
-
-    if lang == "ru":
-        result_text = (
-            f"📊 **Итоговый расчет:**\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"{cat_emoji} **Категория:** {category.upper()}\n"
-            f"🏗 **{prod_label}:** {product}\n"
-            f"🔢 **Количество:** {quantity_or_unit(lang,category,quantity)}\n"
-            f"📍 **Дистанция:** {dist} км\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"💵 Цена за ед.: {p_mat_formatted} сум\n"
-            f"🚛 Доставка: {p_del_formatted} сум\n\n"
-            f"✨ **ИТОГО К ОПЛАТЕ: {p_tot_formatted} сум**"
-        )
-    else:
-        result_text = (
-            f"📊 **Yakuniy hisob:**\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"{cat_emoji} **Kategoriya:** {category.upper()}\n"
-            f"🏗 **{prod_label}:** {product}\n"
-            f"🔢 **Miqdori:** {quantity_or_unit(lang,category,quantity)}\n"
-            f"📍 **Masofa:** {dist} km\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"💵 Dona narxi: {p_mat_formatted} so'm\n"
-            f"🚛 Yetkazib berish: {p_del_formatted} so'm\n\n"
-            f"✨ **JAMI TO'LOV: {p_tot_formatted} so'm**"
-        )
-
+    result_text=calculate_total(category=category,lang=lang,product=product,dist=dist,quantity=quantity)
 
     await callback.message.edit_text(result_text, reply_markup=get_final_order_keyboard(lang))
     await callback.answer()

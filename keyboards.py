@@ -122,10 +122,11 @@ def get_admin_order_keyboard(user_id):
 
 
 def quantity_or_unit(lang,category,quantity):
-    if category == "fbs":
-        unit = "шт" if lang == "ru" else "dona"
-    else:
+    if category == "beton":
         unit = "м³"
+    else:
+        unit = "шт" if lang == "ru" else "dona"
+
 
     return f"{quantity} {unit}"
 
@@ -229,4 +230,112 @@ def back_menu(category,lang):
     return keyboard
 
 
+def calculate_total(category,lang,quantity,product=None,dist=None):
+    config = CATEGORIES_CONFIG.get(category, CATEGORIES_CONFIG["beton"])
+    tovar_name = config[f"tovar_{lang}"]
+    unit = config[f"unit_{lang}"]
+    label = config[f"label_{lang}"]
+    emoji = config["emoji"]
+    price =config['price_dict']
+
+    if category == "fbs":
+        price_material = price.get(product, 0)
+        total_sum = quantity * price_material
+        p_mat_formatted = f"{price_material:,}".replace(",", " ")
+        p_tot_formatted = f"{total_sum:,}".replace(",", " ")
+        if lang == "ru":
+            result_text = (
+                f"📊 **Итоговый расчет:**\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"{emoji} **Категория:** {category.upper()}\n"
+                f"🏗 **{label}:** {product}\n"
+                f"🔢 **Количество:** {quantity_or_unit(lang, category, quantity)}\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"💵 Цена за ед.: {p_mat_formatted} сум\n"
+                f"✨ **ИТОГО К ОПЛАТЕ: {p_tot_formatted} сум**"
+            )
+        else:
+            result_text = (
+                f"📊 **Yakuniy hisob:**\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"{emoji} **Kategoriya:** {category.upper()}\n"
+                f"🏗 **{label}:** {product}\n"
+                f"🔢 **Miqdori:** {quantity_or_unit(lang, category, quantity)}\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"💵 Dona narxi: {p_mat_formatted} so'm\n"
+                f"✨ **JAMI TO'LOV: {p_tot_formatted} so'm**"
+            )
+
+
+    elif category == "beton":
+        price_material = price.get(product, 0)
+        if dist <= distance_from:
+
+            current_delivery = price_beton
+        else:
+
+            extra_km = dist - distance_from
+            current_delivery = price_beton + (extra_km * price_distance)
+
+        total_sum = quantity * (price_material + current_delivery)
+        p_mat_formatted = f"{price_material:,}".replace(",", " ")
+        p_del_formatted = f"{current_delivery:,}".replace(",", " ")
+        p_tot_formatted = f"{total_sum:,}".replace(",", " ")
+
+        if lang == "ru":
+            result_text = (
+                f"📊 **Итоговый расчет:**\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"{emoji} **Категория:** {category.upper()}\n"
+                f"🏗 **{label}:** {product}\n"
+                f"🔢 **Количество:** {quantity_or_unit(lang, category, quantity)}\n"
+                f"📍 **Дистанция:** {dist} км\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"💵 Цена за ед.: {p_mat_formatted} сум\n"
+                f"🚛 Доставка: {p_del_formatted} сум\n\n"
+                f"✨ **ИТОГО К ОПЛАТЕ: {p_tot_formatted} сум**"
+            )
+        else:
+            result_text = (
+                f"📊 **Yakuniy hisob:**\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"{emoji} **Kategoriya:** {category.upper()}\n"
+                f"🏗 **{label}:** {product}\n"
+                f"🔢 **Miqdori:** {quantity_or_unit(lang, category, quantity)}\n"
+                f"📍 **Masofa:** {dist} km\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"💵 Dona narxi: {p_mat_formatted} so'm\n"
+                f"🚛 Yetkazib berish: {p_del_formatted} so'm\n\n"
+                f"✨ **JAMI TO'LOV: {p_tot_formatted} so'm**"
+            )
+    elif category == "lotok":
+        price_material = price
+        total_sum = quantity * price_material
+        p_mat_formatted = f"{price_material:,}".replace(",", " ")
+        p_tot_formatted = f"{total_sum:,}".replace(",", " ")
+        if lang == "ru":
+            result_text = (
+                f"📊 **Итоговый расчет:**\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"{emoji} **Категория:** {category.upper()}\n"
+                f"🔢 **Количество:** {quantity_or_unit(lang, category, quantity)}\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"💵 Цена за ед.: {p_mat_formatted} сум\n"
+                f"✨ **ИТОГО К ОПЛАТЕ: {p_tot_formatted} сум**"
+            )
+        else:
+            result_text = (
+                f"📊 **Yakuniy hisob:**\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"{emoji} **Kategoriya:** {category.upper()}\n"
+                f"🔢 **Miqdori:** {quantity_or_unit(lang, category, quantity)}\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"💵 Dona narxi: {p_mat_formatted} so'm\n"
+                f"✨ **JAMI TO'LOV: {p_tot_formatted} so'm**"
+            )
+
+
+
+
+    return result_text
 

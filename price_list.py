@@ -52,6 +52,6 @@ CATEGORIES_CONFIG = {
         "label_ru": "Размер лотка",
         "label_uz": "Lotok o'lchami",
         "has_distance": False,   # Если нужна дистанция - True, если нет - False
-        "price_dict": None # Не забудь создать этот словарь с ценами
+        "price_dict": 810000 # Не забудь создать этот словарь с ценами
     }
 }
