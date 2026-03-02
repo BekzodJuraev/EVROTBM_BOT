@@ -216,4 +216,17 @@ def get_quantity_text(lang):
     return text
 
 
+def back_menu(category,lang):
+
+    if category == "beton":
+        keyboard=get_beton_keyboard(lang)
+    elif category == "fbs":
+        keyboard= get_fbs_keyboard(lang)
+
+    elif category == "lotok":
+        keyboard=get_cat_menu(lang)
+
+    return keyboard
+
+
 

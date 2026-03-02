@@ -295,7 +295,7 @@ async def process_quantity_order(message: types.Message, state: FSMContext):
     await message.answer(summary, reply_markup=get_calculate_inline(lang))
 
 
-    await message.answer(text, reply_markup=get_beton_keyboard(lang))
+    await message.answer(text, reply_markup=back_menu(category,lang))
 
 
     await state.set_state(OrderSteps.making_order)
