@@ -1,6 +1,6 @@
 from aiogram import Bot, Dispatcher, types,F
 from aiogram.filters.command import Command
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.utils.keyboard import InlineKeyboardBuilder,ReplyKeyboardBuilder
 from price_list import *
 
 from aiogram.filters import BaseFilter
@@ -142,15 +142,42 @@ async def choosing_language(message):
         await message.answer("O'zbek tili tanlandi. Xush kelibsiz! 👋",reply_markup=get_main_menu_kb("uz"))
 
 
-def get_summary_text(category, quantity, lang, product=None, distance=None):
+def get_summary_text(category, lang,quantity=None, product=None, distance=None, cart=None):
     config = CATEGORIES_CONFIG.get(category, CATEGORIES_CONFIG["beton"])
-
     tovar_name = config[f"tovar_{lang}"]
     unit = config[f"unit_{lang}"]
     label = config[f"label_{lang}"]
     emoji = config["emoji"]
 
-    # Собираем начало сообщения
+    # --- ЛОГИКА ДЛЯ ПЛИТ (КОРЗИНА) ---
+    if category == "plita" and cart:
+        if lang == "ru":
+            lines = [
+                f"📝 **Ваш заказ (Плиты):**",
+                f"━━━━━━━━━━━━━━"
+            ]
+            for i, item in enumerate(cart, 1):
+                lines.append(f"{i}. {item['product']} — {item['quantity']} {unit} ({item['distance']} м)")
+
+            lines.append(f"━━━━━━━━━━━━━━")
+            summary = "\n".join(lines)
+            choose_text = "Выберите действие:"
+        else:
+            lines = [
+                f"📝 **Sizning buyurtmangiz (Plitalar):**",
+                f"━━━━━━━━━━━━━━"
+            ]
+            for i, item in enumerate(cart, 1):
+                lines.append(f"{i}. {item['product']} — {item['quantity']} {unit} ({item['distance']} m)")
+
+            lines.append(f"━━━━━━━━━━━━━━")
+            summary = "\n".join(lines)
+            choose_text = "Harakatni tanlang:"
+
+        return summary, choose_text
+
+    # --- ЛОГИКА ДЛЯ ОСТАЛЬНЫХ (БЕТОН, ФБС, ЛОТКИ) ---
+    # (Твой оригинальный код здесь без изменений)
     if lang == "ru":
         lines = [
             f"📝 **Ваш выбор:**",
@@ -161,14 +188,11 @@ def get_summary_text(category, quantity, lang, product=None, distance=None):
         ]
         if config["has_distance"]:
             lines.append(f"🚚 **Дистанция:** `{distance} км` ")
-
         if category == "lotok":
             lines.remove(f"🏗 **{label}:** `{product}`")
-
         lines.append(f"━━━━━━━━━━━━━━")
         summary = "\n".join(lines)
         choose_text = "Выберите действие:"
-
     else:
         lines = [
             f"📝 **Sizning tanlovingiz:**",
@@ -179,10 +203,8 @@ def get_summary_text(category, quantity, lang, product=None, distance=None):
         ]
         if config["has_distance"]:
             lines.append(f"🚚 **Masofa:** `{distance} km` ")
-
         if category == "lotok":
             lines.remove(f"🏗 **{label}:** `{product}`")
-
         lines.append(f"━━━━━━━━━━━━━━")
         summary = "\n".join(lines)
         choose_text = "Harakatni tanlang:"
@@ -190,13 +212,22 @@ def get_summary_text(category, quantity, lang, product=None, distance=None):
     return summary, choose_text
 
 
-def making_order_beton(lang,message):
-    if lang == "ru":
-        text = (f"✅ Вы выбрали: **{message}**\n\n"
-                f"🚚 Введите расстояние доставки вручную (от 1 до 70 км):")
+def making_order_text(lang, category, message):
+    if category == "plita":
+        if lang == "ru":
+            text = (f"✅ Вы выбрали: **{message}**\n\n"
+                    f"📏 Введите точную длину плиты (в метрах, например: 4.1 или 3.9):")
+        else:
+            text = (f"✅ Siz **{message}** ni tanladingiz.\n\n"
+                    f"📏 Plita uzunligini kiriting (metrda, masalan: 4.1 yoki 3.9):")
     else:
-        text = (f"✅ Siz **{message}** ni tanladingiz.\n\n"
-                f"🚚 Yetkazib berish masofasini qo'lda kiriting (1 dan 70 km gacha):")
+        # Стандартная логика для Бетона / ФБС
+        if lang == "ru":
+            text = (f"✅ Вы выбрали: **{message}**\n\n"
+                    f"🚚 Введите расстояние доставки вручную (от 1 до 70 км):")
+        else:
+            text = (f"✅ Siz **{message}** ni tanladingiz.\n\n"
+                    f"🚚 Yetkazib berish masofasini qo'lda kiriting (1 dan 70 km gacha):")
 
     return text
 
@@ -227,19 +258,61 @@ def back_menu(category,lang):
     elif category == "lotok":
         keyboard=get_cat_menu(lang)
 
+    elif category == "plita":
+        keyboard = get_plita_width_kb(lang)
+
+
     return keyboard
 
 
-def calculate_total(category,lang,quantity,product=None,dist=None):
+def calculate_total(category, lang, quantity, product=None, dist=None, cart=None,is_manager=False):
     config = CATEGORIES_CONFIG.get(category, CATEGORIES_CONFIG["beton"])
     tovar_name = config[f"tovar_{lang}"]
-    unit = config[f"unit_{lang}"]
-    label = config[f"label_{lang}"]
     emoji = config["emoji"]
-    price =config['price_dict']
+    label = config[f"label_{lang}"]
+    price_dict = config.get('price_dict', {})
 
-    if category == "fbs":
-        price_material = price.get(product, 0)
+
+    if category == "plita":
+        total_sum = 0
+        items_lines = []
+
+        # Проходим по корзине и считаем каждую позицию
+        for item in cart:
+            p_name = item['product']
+            p_qty = int(item['quantity'])
+            dist=item['distance']
+
+            p_price = calculate_price_plita(p_name,dist)
+            subtotal = p_price *p_qty
+            total_sum += subtotal
+
+            p_price_fmt = f"{p_price:,}".replace(",", " ")
+            items_lines.append(f"🔹 {p_name} - {dist} м\n   {p_qty} шт. x {p_price_fmt} = {f'{subtotal:,}'.replace(',', ' ')} сум")
+
+        items_text = "\n".join(items_lines)
+        p_tot_formatted = f"{total_sum:,}".replace(",", " ")
+
+        if lang == "ru":
+            result_text = (
+                f"📊 **Итоговый расчет (Плиты):**\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"{items_text}\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"✨ **ИТОГО К ОПЛАТЕ: {p_tot_formatted} сум**"
+            )
+        else:
+            result_text = (
+                f"📊 **Yakuniy hisob (Plitalar):**\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"{items_text}\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"✨ **JAMI TO'LOV: {p_tot_formatted} so'm**"
+            )
+
+    # --- ТВОЯ ЛОГИКА ДЛЯ FBS ---
+    elif category == "fbs":
+        price_material = price_dict.get(product, 0)
         total_sum = quantity * price_material
         p_mat_formatted = f"{price_material:,}".replace(",", " ")
         p_tot_formatted = f"{total_sum:,}".replace(",", " ")
@@ -266,14 +339,12 @@ def calculate_total(category,lang,quantity,product=None,dist=None):
                 f"✨ **JAMI TO'LOV: {p_tot_formatted} so'm**"
             )
 
-
+    # --- ТВОЯ ЛОГИКА ДЛЯ БЕТОНА ---
     elif category == "beton":
-        price_material = price.get(product, 0)
+        price_material = price_dict.get(product, 0)
         if dist <= distance_from:
-
             current_delivery = price_beton
         else:
-
             extra_km = dist - distance_from
             current_delivery = price_beton + (extra_km * price_distance)
 
@@ -308,8 +379,10 @@ def calculate_total(category,lang,quantity,product=None,dist=None):
                 f"🚛 Yetkazib berish: {p_del_formatted} so'm\n\n"
                 f"✨ **JAMI TO'LOV: {p_tot_formatted} so'm**"
             )
+
+    # --- ТВОЯ ЛОГИКА ДЛЯ ЛОТКОВ ---
     elif category == "lotok":
-        price_material = price
+        price_material = price_dict  # Здесь в конфиге лотков число напрямую
         total_sum = quantity * price_material
         p_mat_formatted = f"{price_material:,}".replace(",", " ")
         p_tot_formatted = f"{total_sum:,}".replace(",", " ")
@@ -334,8 +407,45 @@ def calculate_total(category,lang,quantity,product=None,dist=None):
                 f"✨ **JAMI TO'LOV: {p_tot_formatted} so'm**"
             )
 
+    if is_manager:
+        # Заменяем заголовок на пустую строку
 
-
+        result_text.replace("📊 **Итоговый расчет:**\n", "🚀 **НОВЫЙ ЗАКАЗ!**\n")
 
     return result_text
+
+def plita_loop(lang):
+    text = ("✅ Плита добавлена в список!\n\n"
+            "Желаете добавить еще плиту другого размера ?") if lang == "ru" else (
+        "✅ Plita ro'yxatga qo'shildi!\n\n"
+        "Boshqa o'lchamdagi plita qo'shasizmi ?")
+    builder = ReplyKeyboardBuilder()
+    builder.button(text="➕ Добавить еще" if lang == "ru" else "➕ Yana qo'shish")
+    builder.button(text="✅ Далее" if lang == "ru" else "✅ Davom etish")
+    keyboard=builder.as_markup(resize_keyboard=True)
+
+
+    return text,keyboard
+
+
+def length_or_distance(category, lang):
+    if category == "plita":
+        return "📏 **Введите длину плиты (в метрах):**" if lang == "ru" else "📏 **Plita uzunligini kiriting (metrda):**"
+    else:
+        return "🚚 **Введите дистанцию доставки (1-70 км):**" if lang == "ru" else "🚚 **Yetkazib berish masofasini kiriting (1-70 km):**"
+
+
+def get_plita_width_kb(lang):
+    builder = ReplyKeyboardBuilder()
+
+    # Кнопки ширины
+    builder.button(text="1.2 м")
+    builder.button(text="1.0 м")
+
+    # Кнопка назад
+    back_text = "⬅️ Назад" if lang == "ru" else "⬅️ Orqaga"
+    builder.row(types.KeyboardButton(text=back_text))
+
+    return builder.as_markup(resize_keyboard=True)
+
 

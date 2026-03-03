@@ -25,6 +25,7 @@ class OrderSteps(StatesGroup):
     making_order = State()
     entering_distance=State()
     quantity_order=State()
+    choosing_plita_width=State()
 
 @dp.message(F.text.in_({"⬅️ Назад", "⬅️ Orqaga"}))
 async def go_back(message: types.Message, state: FSMContext):
@@ -32,6 +33,8 @@ async def go_back(message: types.Message, state: FSMContext):
     current_state = await state.get_state()
     user_data = await state.get_data()
     lang = user_data.get("user_lang", "ru")
+    category = user_data.get("product")
+
 
 
     if current_state == OrderSteps.main_menu:
@@ -47,10 +50,18 @@ async def go_back(message: types.Message, state: FSMContext):
         await message.answer("Возвращаемся в меню..." if lang == "ru" else "Menyuga qaytamiz...", reply_markup=get_main_menu_kb(lang))
 
     elif current_state == OrderSteps.making_order:
+        if category == "lotok":
+            await state.set_state(OrderSteps.main_menu)
+            await message.answer("Возвращаемся в меню..." if lang == "ru" else "Menyuga qaytamiz...",
+                                 reply_markup=get_main_menu_kb(lang))
 
-        await state.set_state(OrderSteps.main_category)
-        await message.answer("Возвращаемся в меню..." if lang == "ru" else "Menyuga qaytamiz...",
-                             reply_markup=get_cat_menu(lang))
+        else:
+            await state.set_state(OrderSteps.main_category)
+            await message.answer("Возвращаемся в меню..." if lang == "ru" else "Menyuga qaytamiz...",
+                                 reply_markup=get_cat_menu(lang))
+
+
+
 # Обработка кнопки "Выполнено"
 @dp.callback_query(F.data.startswith("order_done_"))
 async def admin_done(callback: types.CallbackQuery):
@@ -102,52 +113,16 @@ async def confirm_order(callback: types.CallbackQuery, state: FSMContext):
     # Извлекаем все данные из состояния
     category = data.get("product")  # Категория (бетон/fbs)
     product = data.get("selected_product")
-    dist = int(data.get("distance", 0))
+    dist = data.get("distance", 0)
     quantity = int(data.get("quantity", 0))
+    cart = data.get("cart")
 
-    # 1. Считаем цену за единицу товара
-    if category == "fbs":
-        price_material = fbs_prices.get(product, 0)
-        cat_emoji = "🧱"
-        prod_label = "Тип блока" if lang == "ru" else "Blok turi"
-    else:
-        price_material = beton.get(product, 0)
-        cat_emoji = "💧"
-        prod_label = "Марка" if lang == "ru" else "Markasi"
 
-    # 2. Логика расчета доставки (твои переменные)
-    if dist <= distance_from:
-        current_delivery = price_beton
-    else:
-        extra_km = dist - distance_from
-        current_delivery = price_beton + (extra_km * price_distance)
-
-    # Итоговая сумма: (Цена товара + Доставка) * Количество
-    total_sum = quantity * (price_material + current_delivery)
-    p_tot_formatted = f"{total_sum:,}".replace(",", " ")
-
-    # Получаем красиво отформатированное количество (вызываем твою функцию)
-    q_unit = quantity_or_unit(lang, category, quantity)
-
-    # --- ТЕКСТ ДЛЯ ГРУППЫ (Точно как у пользователя) ---
-    report = (
-        f"🚀 **НОВЫЙ ЗАКАЗ!**\n"
-        f"━━━━━━━━━━━━━━\n"
-        f"👤 **Клиент:** {callback.from_user.full_name} (@{callback.from_user.username})\n"
-        f"{cat_emoji} **Категория:** {category.upper()}\n"
-        f"🏗 **{prod_label}:** {product}\n"
-        f"🔢 **Количество:** {q_unit}\n"
-        f"📍 **Дистанция:** {dist} км\n"
-        f"━━━━━━━━━━━━━━\n"
-        f"💰 **ИТОГО К ОПЛАТЕ: {p_tot_formatted} сум**\n"
-        f"━━━━━━━━━━━━━━"
-    )
-
-    # Отправка в группу менеджерам
+    result_text=calculate_total(category=category,lang=lang,product=product,dist=dist,quantity=quantity,cart=cart,is_manager=True)
     try:
         await callback.bot.send_message(
             chat_id=GROUP_ID,
-            text=report,
+            text=result_text,
             reply_markup=get_admin_order_keyboard(user_id=callback.from_user.id),
             parse_mode="Markdown"
         )
@@ -157,7 +132,7 @@ async def confirm_order(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.edit_text(msg)
 
         # Очищаем данные после успешной отправки
-        await state.clear()
+
 
     except Exception as e:
         await callback.answer(f"Ошибка при отправке: {e}", show_alert=True)
@@ -180,37 +155,101 @@ async def final_calculation(callback: types.CallbackQuery, state: FSMContext):
     product = data.get("selected_product")
     dist = int(data.get("distance", 0))
     quantity=int(data.get("quantity",0))
+    cart = data.get("cart")
 
-    result_text=calculate_total(category=category,lang=lang,product=product,dist=dist,quantity=quantity)
+
+    result_text=calculate_total(category=category,lang=lang,product=product,dist=dist,quantity=quantity,cart=cart)
+
+
+
 
     await callback.message.edit_text(result_text, reply_markup=get_final_order_keyboard(lang))
     await callback.answer()
+    #await state.update_data(cart=[])
+
 
 @dp.message(OrderSteps.entering_distance)
 async def process_distance_manual(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     lang = user_data.get("user_lang", "ru")
+    category = user_data.get("product")
+
     await message.delete()
 
-
     try:
-        distance = int(message.text.strip())
+        # Заменяем запятую на точку, чтобы принимало 3.9 или 3,9
+        value = float(message.text.strip().replace(",", "."))
     except ValueError:
-        error_text = "Введите число (1-70)!" if lang == "ru" else "Raqam kiriting (1-70)!"
+        error_text = "Введите число!" if lang == "ru" else "Raqam kiriting!"
         await message.answer(error_text)
         return
 
-    if 1 <= distance <= 70:
-        await state.update_data(distance=distance)
-        await state.set_state(OrderSteps.quantity_order)
-        text = get_quantity_text(lang)
-        sent_msg = await message.answer(text)
-
-
+    # Логика проверки в зависимости от категории
+    if category == "plita":
+        # Проверка длины плиты (например, от 1.9 до 9.0 метров)
+        if 1.9 <= value <= 9.0:
+            await state.update_data(distance=value)  # сохраняем в то же поле для удобства
+            await state.set_state(OrderSteps.quantity_order)
+            await message.answer(get_quantity_text(lang))
+        else:
+            limit_text = "Длина плиты должна быть от 1.9 до 9.0 м!" if lang == "ru" else "Plita uzunligi 1.9 dan 9.0 m gacha bo'lishi kerak!"
+            await message.answer(limit_text)
 
     else:
-        limit_text = "Доставка только от 1 до 70 км!" if lang == "ru" else "Yetkazib berish faqat 1 dan 70 km gacha!"
-        await message.answer(limit_text)
+        # Логика для БЕТОНА (дистанция)
+        if 1 <= value <= 70:
+            await state.update_data(distance=int(value))
+            await state.set_state(OrderSteps.quantity_order)
+            await message.answer(get_quantity_text(lang))
+        else:
+            limit_text = "Доставка только от 1 до 70 км!" if lang == "ru" else "Yetkazib berish faqat 1 dan 70 km gacha!"
+            await message.answer(limit_text)
+
+
+@dp.message(OrderSteps.choosing_plita_width)
+async def handle_cart_options(message: types.Message, state: FSMContext):
+    user_data = await state.get_data()
+    lang = user_data.get("user_lang", "ru")
+    choice = message.text
+    category = user_data.get("product")
+    distance=user_data.get("distance")
+
+    # 1. Если пользователь хочет добавить еще одну плиту
+    if choice in ["➕ Добавить еще", "➕ Yana qo'shish"]:
+
+        await state.update_data(selected_product=None, plita_width=None)
+
+
+        text = "🏗 **Выберите ширину для следующей плиты:**" if lang == "ru" else "🏗 **Keyingi plita kengligini tanlang:**"
+        await message.answer(text, reply_markup=get_plita_width_kb(lang))
+
+
+
+
+    elif choice in ["✅ Далее", "✅ Davom etish"]:
+        cart = user_data.get("cart", [])
+
+        if not cart:
+            await message.answer("Ваша корзина пуста!" if lang == "ru" else "Savat bo'sh!")
+            return
+
+
+
+
+
+
+
+        summary, text_info = get_summary_text(category=category,lang=lang,cart=cart,distance=distance)
+        await message.answer(summary, reply_markup=get_calculate_inline(lang))
+        await message.answer(text_info, reply_markup=back_menu(category, lang))
+
+
+
+    await state.set_state(OrderSteps.making_order)
+
+
+
+
 
 
 @dp.message(OrderSteps.quantity_order)
@@ -219,30 +258,52 @@ async def process_quantity_order(message: types.Message, state: FSMContext):
     lang = user_data.get("user_lang", "ru")
     category = user_data.get("product")
     product = user_data.get("selected_product")
-    distance = int(user_data.get("distance", 0))
+    distance = user_data.get("distance", 0)
+
     await message.delete()
 
-
-
+    # 1. Проверка числа
     try:
         quantity = int(message.text.strip())
+        await state.update_data(quantity=quantity)
     except ValueError:
-        error_text = "Введите число !" if lang == "ru" else "Raqam kiriting !"
+        error_text = "Введите число!" if lang == "ru" else "Raqam kiriting!"
         await message.answer(error_text)
         return
 
-    await state.update_data(quantity=quantity)
-
-    summary, text=get_summary_text(category=category,quantity=quantity,lang=lang,product=product,distance=distance)
-
-    await message.answer(summary, reply_markup=get_calculate_inline(lang))
+    # 2. Получаем текущую корзину или создаем новую, если её нет
 
 
-    await message.answer(text, reply_markup=back_menu(category,lang))
 
 
-    await state.set_state(OrderSteps.making_order)
 
+
+    if category == "plita":
+        cart = user_data.get("cart", [])
+        await state.update_data(cart=cart)
+
+
+        cart.append({
+            "product": product,
+            "quantity": quantity,
+            "distance":distance
+        })
+
+
+
+
+        text, keyboard=plita_loop(lang)
+        await message.answer(text, reply_markup=keyboard)
+
+        await state.set_state(OrderSteps.choosing_plita_width)
+
+    else:
+        # Для бетона или ФБС оставляем как было (сразу к итогу)
+        summary, text_info = get_summary_text(category=category, quantity=quantity, lang=lang, product=product,
+                                              distance=distance)
+        await message.answer(summary, reply_markup=get_calculate_inline(lang))
+        await message.answer(text_info, reply_markup=back_menu(category, lang))
+        await state.set_state(OrderSteps.making_order)
 
 
 
@@ -263,7 +324,7 @@ async def process_beton_mark(message: types.Message, state: FSMContext):
     # DRY LOGIC: Check if this category needs distance
     if config.get("has_distance"):
         await state.set_state(OrderSteps.entering_distance)
-        text = making_order_beton(lang, message.text)  # Specific text for distance
+        text = making_order_text(lang, category,message.text)  # Specific text for distance
     else:
         # For FBS, Lotok, and anything else without distance
         await state.set_state(OrderSteps.quantity_order)
@@ -306,6 +367,14 @@ async def set_product_category(message: types.Message, state: FSMContext):
         kb=None
 
 
+    elif "Плиты перекрытия" in choice or "Plitalar" in choice:
+        await state.update_data(product="plita")
+        text = "🏗 **Выберите ширину плиты:**" if lang == "ru" else "🏗 **Plita kengligini tanlang:**"
+        await state.set_state(OrderSteps.making_order)
+        kb = get_plita_width_kb(lang)
+
+
+
 
 
     else:
@@ -343,10 +412,17 @@ async def set_categories(message: types.Message, state: FSMContext):
 @dp.message(OrderSteps.choosing_language)
 async def set_language(message: types.Message,state: FSMContext):
     user_data = await state.get_data()
-    lang = user_data.get("user_lang", "ru")
+    lang = user_data.get("user_lang")
 
 
-    await choosing_language(message)
+    #await choosing_language(message)
+    if "Русский" in message.text:
+        lang = "ru"
+        await message.answer("Установлен русский язык. Добро пожаловать! 👋",reply_markup=get_main_menu_kb(lang))
+    else:
+        lang = "uz"
+
+        await message.answer("O'zbek tili tanlandi. Xush kelibsiz! 👋",reply_markup=get_main_menu_kb(lang))
 
     await state.set_state(OrderSteps.main_menu)
     await state.update_data(user_lang=lang)
