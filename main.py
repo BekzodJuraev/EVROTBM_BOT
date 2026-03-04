@@ -9,16 +9,16 @@ from price_list import beton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 GROUP_ID = -5146609253
 logging.basicConfig(level=logging.INFO)
-from sqlalchemy import select,insert,func
+from sqlalchemy import select,insert,func,update,delete
 bot = Bot(token="8629839438:AAEX-m2gvZTdOhJCvZ8lrgGNaC7HrnIfFIM")
 # Диспетчер
 from sqlalchemy.ext.asyncio import AsyncSession
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 import asyncio
-from database import async_main, async_session  # Импортируем из твоего файла
+from database import async_main, async_session
 from db_middleware import DbSessionMiddleware
-from models import User
+from models import User,Order,OrderStatus
 dp = Dispatcher()
 dp.message
 
@@ -68,17 +68,22 @@ async def go_back(message: types.Message, state: FSMContext):
 
 
 
-# Обработка кнопки "Выполнено"
-@dp.callback_query(F.data.startswith("order_done_"))
-async def admin_done(callback: types.CallbackQuery):
-    # Достаем ID пользователя из callback_data
-    user_id = int(callback.data.split("_")[2])
 
-    # 1. Обновляем текст в группе
+@dp.callback_query(F.data.startswith("order_done_"))
+async def admin_done(callback: types.CallbackQuery,session:AsyncSession):
+    user_id = int(callback.data.split("_")[2])
+    stmt = delete(Order).where(
+        Order.message_id == callback.message.message_id,
+        Order.user_id == user_id
+    )
+    await session.execute(stmt)
+    await session.commit()
+
+
     new_text = callback.message.text + f"\n\n✅ **ВЫПОЛНЕНО**\n(Кем: {callback.from_user.first_name})"
     await callback.message.edit_text(new_text)
 
-    # 2. Отправляем сообщение пользователю
+
     try:
         await callback.bot.send_message(
             chat_id=user_id,
@@ -92,8 +97,14 @@ async def admin_done(callback: types.CallbackQuery):
 
 # Обработка кнопки "Отмена"
 @dp.callback_query(F.data.startswith("order_cancel_"))
-async def admin_cancel(callback: types.CallbackQuery):
+async def admin_cancel(callback: types.CallbackQuery,session:AsyncSession):
     user_id = int(callback.data.split("_")[2])
+    stmt = delete(Order).where(
+        Order.message_id == callback.message.message_id,
+        Order.user_id == user_id
+    )
+    await session.execute(stmt)
+    await session.commit()
 
     # 1. Обновляем текст в группе
     new_text = callback.message.text + f"\n\n❌ **ОТМЕНЕНО АДМИНОМ**"
@@ -112,12 +123,12 @@ async def admin_cancel(callback: types.CallbackQuery):
 
 
 @dp.callback_query(F.data == "confirm_order")
-async def confirm_order(callback: types.CallbackQuery, state: FSMContext):
+async def confirm_order(callback: types.CallbackQuery, state: FSMContext,session:AsyncSession):
     data = await state.get_data()
     lang = data.get("user_lang", "ru")
 
-    # Извлекаем все данные из состояния
-    category = data.get("product")  # Категория (бетон/fbs)
+
+    category = data.get("product")
     product = data.get("selected_product")
     dist = data.get("distance", 0)
     quantity = int(data.get("quantity", 0))
@@ -126,19 +137,25 @@ async def confirm_order(callback: types.CallbackQuery, state: FSMContext):
 
     result_text=calculate_total(category=category,lang=lang,product=product,dist=dist,quantity=quantity,cart=cart,is_manager=True)
     try:
-        await callback.bot.send_message(
+        x=await callback.bot.send_message(
             chat_id=GROUP_ID,
             text=result_text,
             reply_markup=get_admin_order_keyboard(user_id=callback.from_user.id),
             parse_mode="Markdown"
         )
 
-        # Ответ пользователю в боте
+
         msg = "✅ Заявка отправлена! Менеджер свяжется с вами." if lang == "ru" else "✅ Arizangiz yuborildi! Menajer bog'lanadi."
         await callback.message.edit_text(msg)
 
-        # Очищаем данные после успешной отправки
+        stmt = (
+            update(Order)
+                .where(Order.message_id == callback.message.message_id)
+                .values(status=OrderStatus.SENDING,message_id=x.message_id)
+        )
 
+        await session.execute(stmt)
+        await session.commit()
 
     except Exception as e:
         await callback.answer(f"Ошибка при отправке: {e}", show_alert=True)
@@ -146,15 +163,34 @@ async def confirm_order(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# Хендлер ОТМЕНИТЬ
+
+
 @dp.callback_query(F.data == "cancel_order")
-async def cancel_order(callback: types.CallbackQuery, state: FSMContext):
-    await state.clear()  # Очищаем данные
-    await callback.message.delete()  # Удаляем всё сообщение с расчетом
+async def cancel_order(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
+    # 1. Удаляем запись из базы данных
+    # Используем message_id и user_id для точности
+    stmt = delete(Order).where(
+        Order.message_id == callback.message.message_id,
+        Order.user_id == callback.from_user.id
+    )
+    await session.execute(stmt)
+    await session.commit()
+
+    # 2. Очищаем состояние FSM
+    await state.clear()
+
+    # 3. Удаляем само сообщение в Telegram
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        # На случай, если сообщение уже удалено или прошло более 48 часов
+        print(f"Ошибка удаления сообщения: {e}")
+
+    # 4. Уведомляем пользователя
     await callback.answer("Отменено / Bekor qilindi")
 
 @dp.callback_query(F.data == "calculate_total")
-async def final_calculation(callback: types.CallbackQuery, state: FSMContext):
+async def final_calculation(callback: types.CallbackQuery, state: FSMContext,session:AsyncSession):
     data = await state.get_data()
     lang = data.get("user_lang", "ru")
     category = data.get("product")
@@ -164,12 +200,27 @@ async def final_calculation(callback: types.CallbackQuery, state: FSMContext):
     cart = data.get("cart")
 
 
+
     result_text=calculate_total(category=category,lang=lang,product=product,dist=dist,quantity=quantity,cart=cart)
 
 
 
 
+
     await callback.message.edit_text(result_text, reply_markup=get_final_order_keyboard(lang))
+    current_msg_id = callback.message.message_id
+
+
+    stmt = (
+        update(Order)
+            .where(Order.message_id == callback.message.message_id)
+            .values(order_text=result_text, status=OrderStatus.CALCULATION)
+    )
+
+
+    await session.execute(stmt)
+    await session.commit()
+
     await callback.answer()
     #await state.update_data(cart=[])
 
@@ -213,7 +264,7 @@ async def process_distance_manual(message: types.Message, state: FSMContext):
 
 
 @dp.message(OrderSteps.choosing_plita_width)
-async def handle_cart_options(message: types.Message, state: FSMContext):
+async def handle_cart_options(message: types.Message, state: FSMContext,session:AsyncSession):
     user_data = await state.get_data()
     lang = user_data.get("user_lang", "ru")
     choice = message.text
@@ -246,7 +297,22 @@ async def handle_cart_options(message: types.Message, state: FSMContext):
 
 
         summary, text_info = get_summary_text(category=category,lang=lang,cart=cart,distance=distance)
-        await message.answer(summary, reply_markup=get_calculate_inline(lang))
+        sent_message = await message.answer(
+            summary,
+            reply_markup=get_calculate_inline(lang)
+        )
+
+
+        msg_id = sent_message.message_id
+        new_order = Order(
+            user_id=message.from_user.id,
+            message_id=msg_id,
+            order_text=summary,
+            status=OrderStatus.PENDING
+        )
+
+        session.add(new_order)
+        await session.commit()
         await message.answer(text_info, reply_markup=back_menu(category, lang))
 
 
@@ -259,7 +325,7 @@ async def handle_cart_options(message: types.Message, state: FSMContext):
 
 
 @dp.message(OrderSteps.quantity_order)
-async def process_quantity_order(message: types.Message, state: FSMContext):
+async def process_quantity_order(message: types.Message, state: FSMContext,session:AsyncSession):
     user_data = await state.get_data()
     lang = user_data.get("user_lang", "ru")
     category = user_data.get("product")
@@ -307,7 +373,24 @@ async def process_quantity_order(message: types.Message, state: FSMContext):
 
         summary, text_info = get_summary_text(category=category, quantity=quantity, lang=lang, product=product,
                                               distance=distance)
-        await message.answer(summary, reply_markup=get_calculate_inline(lang))
+
+        sent_message = await message.answer(
+            summary,
+            reply_markup=get_calculate_inline(lang)
+        )
+
+
+        msg_id = sent_message.message_id
+        new_order = Order(
+            user_id=message.from_user.id,
+            message_id=msg_id,  # Сохраняем именно ID ответа бота
+            order_text=summary,  # Тот самый текст, который над кнопкой
+            status=OrderStatus.PENDING
+        )
+
+        session.add(new_order)
+        await session.commit()
+
         await message.answer(text_info, reply_markup=back_menu(category, lang))
 
         if category == "lotok":
@@ -315,6 +398,7 @@ async def process_quantity_order(message: types.Message, state: FSMContext):
 
         else:
             await state.set_state(OrderSteps.making_order)
+
 
 
 
@@ -441,6 +525,44 @@ async def set_language(message: types.Message,state: FSMContext):
     await state.update_data(user_lang=lang)
 
 
+@dp.message(F.text.in_(["📋 Мои заявки", "📋 Mening buyurtmalarim"]))
+async def show_my_orders(message: types.Message,state: FSMContext, session: AsyncSession):
+    # 1. Запрос в базу: ищем заказы пользователя со статусом SENDING
+    # Сортируем по дате, чтобы новые были сверху
+    query = (
+        select(Order)
+            .where(
+            Order.user_id == message.from_user.id,
+            Order.status == OrderStatus.SENDING  # Или "sending", если у тебя строки
+        )
+            .order_by(Order.created_at.desc())
+    )
+
+    result = await session.execute(query)
+    orders = result.scalars().all()
+
+    # 2. Проверяем, есть ли заказы
+    if not orders:
+        text = {
+            "ru": "📭 У вас нет активных заявок.",
+            "uz": "📭 Sizda faol buyurtmalar yo'q."
+        }
+        # Тут можно добавить логику определения языка пользователя
+        await message.answer(text["ru"])
+        return
+
+    # 3. Формируем список заявок
+    response_text = "📋 <b>Ваши активные заявки:</b>\n\n"
+
+    for i, order in enumerate(orders, 1):
+        # Ограничим текст заявки, если он слишком длинный, или выведем как есть
+        date_str = order.created_at.strftime("%d.%m.%Y %H:%M")
+        response_text += f"<b>Заказ №{i}</b> ({date_str}):\n{order.order_text}\n"
+        response_text += "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
+
+    # 4. Отправляем результат
+    await message.answer(response_text, parse_mode="HTML")
+    await state.set_state(OrderSteps.main_menu)
 
 
 @dp.message(Command("help"))
