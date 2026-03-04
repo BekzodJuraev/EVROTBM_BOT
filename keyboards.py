@@ -408,9 +408,31 @@ def calculate_total(category, lang, quantity, product=None, dist=None, cart=None
             )
 
     if is_manager:
-        # Заменяем заголовок на пустую строку
+        if category == "plita" :
+            result_text = (
+                f"🚀 **НОВЫЙ ЗАКАЗ!**\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"{emoji} **Категория:** {category.upper()}\n"
+                f"{items_text}\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"✨ **ИТОГО К ОПЛАТЕ: {p_tot_formatted} сум**"
+            )
 
-        result_text.replace("📊 **Итоговый расчет:**\n", "🚀 **НОВЫЙ ЗАКАЗ!**\n")
+        else:
+            result_text = (
+                f"🚀 **НОВЫЙ ЗАКАЗ!**\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"{emoji} **Категория:** {category.upper()}\n"
+                f"🔢 **Количество:** {quantity_or_unit(lang, category, quantity)}\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"💵 Цена за ед.: {p_mat_formatted} сум\n"
+                f"✨ **ИТОГО К ОПЛАТЕ: {p_tot_formatted} сум**"
+            )
+
+
+
+
+
 
     return result_text
 

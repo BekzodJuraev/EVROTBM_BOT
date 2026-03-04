@@ -2,21 +2,27 @@ import asyncio
 import logging
 from aiogram import Bot, Dispatcher, types,F
 from aiogram.filters.command import Command
+from db_middleware import DbSessionMiddleware
 from keyboards import *
 from price_list import beton
 # Включаем логирование, чтобы не пропустить важные сообщения
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 GROUP_ID = -5146609253
 logging.basicConfig(level=logging.INFO)
-
+from sqlalchemy import select,insert,func
 bot = Bot(token="8629839438:AAEX-m2gvZTdOhJCvZ8lrgGNaC7HrnIfFIM")
 # Диспетчер
-dp = Dispatcher()
-dp.message
+from sqlalchemy.ext.asyncio import AsyncSession
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
+import asyncio
+from database import async_main, async_session  # Импортируем из твоего файла
+from db_middleware import DbSessionMiddleware
+from models import User
+dp = Dispatcher()
+dp.message
 
-
+from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 
 class OrderSteps(StatesGroup):
     choosing_language = State()
@@ -298,12 +304,19 @@ async def process_quantity_order(message: types.Message, state: FSMContext):
         await state.set_state(OrderSteps.choosing_plita_width)
 
     else:
-        # Для бетона или ФБС оставляем как было (сразу к итогу)
+
         summary, text_info = get_summary_text(category=category, quantity=quantity, lang=lang, product=product,
                                               distance=distance)
         await message.answer(summary, reply_markup=get_calculate_inline(lang))
         await message.answer(text_info, reply_markup=back_menu(category, lang))
-        await state.set_state(OrderSteps.making_order)
+
+        if category == "lotok":
+            await state.set_state(OrderSteps.main_category)
+
+        else:
+            await state.set_state(OrderSteps.making_order)
+
+
 
 
 
@@ -458,9 +471,82 @@ async def send_help(message: types.Message):
 
 
 @dp.message(Command("start"))
-async def cmd_start(message: types.Message,state: FSMContext):
-    await message.answer("<b>Выберите язык / Tilni tanlang</b> 🌍", reply_markup=get_lang_kb(), parse_mode="HTML")
+async def cmd_start(message: types.Message, state: FSMContext, session: AsyncSession):
+
+    result = await session.execute(select(User).filter_by(telegram_id=message.from_user.id))
+    user = result.scalar_one_or_none()
+
+    if not user:
+
+        new_user = User(
+            telegram_id=message.from_user.id
+        )
+        session.add(new_user)
+        await session.commit()
+
+    await message.answer(
+        "<b>Выберите язык / Tilni tanlang</b> 🌍",
+        reply_markup=get_lang_kb(),
+        parse_mode="HTML"
+    )
     await state.set_state(OrderSteps.choosing_language)
+
+
+@dp.message(Command("list"))
+async def cmd_list(message: types.Message, session: AsyncSession):
+
+    result = await session.execute(select(func.count(User.id)))
+    count = result.scalar()
+
+    await message.answer(
+        f"👥 Всего зарегистрировано пользователей: <b>{count}</b>",
+        parse_mode="HTML"
+    )
+
+
+@dp.message(Command("send"))
+async def cmd_send_all(message: types.Message, session: AsyncSession):
+
+    text_to_send = message.text.replace("/send", "").strip()
+
+    if not text_to_send:
+        await message.answer("❌ Введите текст рассылки после команды. Пример: <code>/send Привет!</code>")
+        return
+
+    # 3. Берем всех юзеров из БД
+    result = await session.execute(select(User.telegram_id))
+    users = result.scalars().all()
+
+    count = 0
+    blocked = 0
+
+    await message.answer(f"🚀 Рассылка началась для {len(users)} пользователей...")
+
+    # 4. Цикл рассылки
+    for user_id in users:
+        try:
+            await bot.send_message(chat_id=user_id, text=text_to_send)
+            count += 1
+            # Небольшая пауза, чтобы Telegram не забанил за спам (Flood Limit)
+            await asyncio.sleep(0.05)
+
+        except TelegramForbiddenError:
+            # Юзер заблокировал бота
+            blocked += 1
+        except TelegramRetryAfter as e:
+            # Если превысили лимит сообщений в секунду
+            await asyncio.sleep(e.retry_after)
+            await bot.send_message(chat_id=user_id, text=text_to_send)
+            count += 1
+        except Exception as e:
+            print(f"Ошибка при отправке {user_id}: {e}")
+
+    await message.answer(
+        f"✅ <b>Рассылка завершена!</b>\n\n"
+        f"👤 Получили: {count}\n"
+        f"🚫 Заблокировали бота: {blocked}",
+        parse_mode="HTML"
+    )
 
 @dp.message(Command("готово"))
 async def cmd_start(message: types.Message):
@@ -476,7 +562,20 @@ async def cmd_start(message: types.Message):
 
 
 async def main():
+
+    await async_main()
+
+
+    dp.update.middleware(DbSessionMiddleware(session_pool=async_session))
+
+    # 3. Запуск бота
+    # Рекомендуется пропускать накопившиеся сообщения при запуске
+    await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
-if __name__ == "__main__":
-    asyncio.run(main())
+
+if __name__ == '__main__':
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Бот выключен")
