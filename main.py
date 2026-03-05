@@ -8,10 +8,13 @@ from price_list import beton
 # Включаем логирование, чтобы не пропустить важные сообщения
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 GROUP_ID = -5146609253
+#GROUP_ID=-1001994222785
+ADMIN_ID=6201199089
+from pydantic import ValidationError
 logging.basicConfig(level=logging.INFO)
 from sqlalchemy import select,insert,func,update,delete
 bot = Bot(token="8629839438:AAEX-m2gvZTdOhJCvZ8lrgGNaC7HrnIfFIM")
-# Диспетчер
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
@@ -19,8 +22,12 @@ import asyncio
 from database import async_main, async_session
 from db_middleware import DbSessionMiddleware
 from models import User,Order,OrderStatus
+from schemas import DateValidation,UserContact
+from pydantic import ValidationError
 dp = Dispatcher()
 dp.message
+
+
 
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
 
@@ -32,6 +39,79 @@ class OrderSteps(StatesGroup):
     entering_distance=State()
     quantity_order=State()
     choosing_plita_width=State()
+    choosing_name=State()
+    choosing_phone_number=State()
+    choosing_date_ready=State()
+
+@dp.message(Command("list"))
+async def cmd_list(message: types.Message, session: AsyncSession,state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    await state.clear()
+
+
+
+
+
+    result = await session.execute(select(func.count(User.id)))
+    count = result.scalar()
+
+    await message.answer(
+        f"👥 Всего зарегистрировано пользователей: <b>{count}</b>",
+        parse_mode="HTML"
+    )
+    await cmd_start(message=message, state=state, session=session)
+
+
+@dp.message(Command("send"))
+async def cmd_send_all(message: types.Message, session: AsyncSession,state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.clear()
+
+
+    text_to_send = message.text.replace("/send", "").strip()
+
+    if not text_to_send:
+        await message.answer("❌ Введите текст рассылки после команды. Пример: <code>/send Привет!</code>")
+        return
+
+    # 3. Берем всех юзеров из БД
+    result = await session.execute(select(User.telegram_id))
+    users = result.scalars().all()
+
+    count = 0
+    blocked = 0
+
+    await message.answer(f"🚀 Рассылка началась для {len(users)} пользователей...")
+
+    # 4. Цикл рассылки
+    for user_id in users:
+        try:
+            await bot.send_message(chat_id=user_id, text=text_to_send)
+            count += 1
+            # Небольшая пауза, чтобы Telegram не забанил за спам (Flood Limit)
+            await asyncio.sleep(0.05)
+
+        except TelegramForbiddenError:
+            # Юзер заблокировал бота
+            blocked += 1
+        except TelegramRetryAfter as e:
+            # Если превысили лимит сообщений в секунду
+            await asyncio.sleep(e.retry_after)
+            await bot.send_message(chat_id=user_id, text=text_to_send)
+            count += 1
+        except Exception as e:
+            print(f"Ошибка при отправке {user_id}: {e}")
+
+    await message.answer(
+        f"✅ <b>Рассылка завершена!</b>\n\n"
+        f"👤 Получили: {count}\n"
+        f"🚫 Заблокировали бота: {blocked}",
+        parse_mode="HTML"
+    )
+    await cmd_start(message=message, state=state, session=session)
 
 @dp.message(F.text.in_({"⬅️ Назад", "⬅️ Orqaga"}))
 async def go_back(message: types.Message, state: FSMContext):
@@ -67,8 +147,133 @@ async def go_back(message: types.Message, state: FSMContext):
                                  reply_markup=get_cat_menu(lang))
 
 
+@dp.message(OrderSteps.choosing_name)
+async def process_name(message: types.Message, state: FSMContext):
+    await state.update_data(customer_name=message.text)
+    await message.answer("Введите ваш номер телефона 📱:")
+    await state.set_state(OrderSteps.choosing_phone_number)
+    await message.delete()
 
 
+# 2. Спрашиваем телефон
+@dp.message(OrderSteps.choosing_phone_number)
+async def process_phone(message: types.Message, state: FSMContext):
+    try:
+
+        UserContact(phone=message.text)
+
+
+        await state.update_data(customer_phone=message.text)
+        await message.answer("Дата Отгрузки (ДД.ММ.ГГГГ):")
+        await state.set_state(OrderSteps.choosing_date_ready)
+        await message.delete()
+
+    except ValidationError as e:
+
+        error_msg = e.errors()[0]['msg']
+        await message.answer(f"❌ Ошибка: {error_msg}\nПопробуйте еще раз в формате +998XXXXXXXXX")
+
+
+
+@dp.message(OrderSteps.choosing_date_ready)
+async def process_date(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("user_lang", "ru")
+    category = data.get("product")
+    product = data.get("selected_product")
+    dist = int(data.get("distance", 0))
+    quantity = int(data.get("quantity", 0))
+    cart = data.get("cart")
+    phone=data.get("customer_phone")
+    name = data.get("customer_name")
+    msg_id = data.get("last_msg_id")
+    try:
+
+
+
+        valid_data = DateValidation(input_date=message.text)
+        chosen_date = valid_data.input_date
+        date=chosen_date.strftime("%d.%m.%Y")
+
+
+
+        await state.update_data(date_ready=date)
+        result_text = calculate_total(category=category, lang=lang, product=product, dist=dist, quantity=quantity,
+                                      cart=cart,phone=phone,name=name,date=date)
+
+        await message.bot.edit_message_text(
+            chat_id=message.chat.id,
+            message_id=msg_id,
+            text=result_text,
+            parse_mode="HTML",
+            reply_markup=get_final_order_keyboard_last(lang)
+        )
+
+        await message.delete()
+
+
+
+
+
+
+
+
+
+    except ValidationError as e:
+        # Берем текст ошибки из нашего валидатора
+        error_text = e.errors()[0]['msg']
+        await message.answer(f"❌ {error_text}")
+
+
+@dp.callback_query(F.data == "confirm_order_last")
+async def confirm_order(callback: types.CallbackQuery, state: FSMContext,session:AsyncSession):
+    data = await state.get_data()
+    lang = data.get("user_lang", "ru")
+
+
+    category = data.get("product")
+    product = data.get("selected_product")
+    dist = data.get("distance", 0)
+    quantity = int(data.get("quantity", 0))
+    cart = data.get("cart")
+    phone=data.get("customer_phone")
+    name = data.get("customer_name")
+    date = data.get("date_ready")
+
+
+
+
+
+
+    result_text=calculate_total(category=category, lang=lang, product=product, dist=dist, quantity=quantity,
+                    cart=cart, phone=phone, name=name, date=date,is_manager=True)
+    try:
+        x=await callback.bot.send_message(
+            chat_id=GROUP_ID,
+            text=result_text,
+            reply_markup=get_admin_order_keyboard(user_id=callback.from_user.id),
+            parse_mode="HTML"
+        )
+
+
+        msg = "✅ Заявка отправлена! Менеджер свяжется с вами." if lang == "ru" else "✅ Arizangiz yuborildi! Menajer bog'lanadi."
+        await callback.message.edit_text(msg)
+
+        stmt = (
+            update(Order)
+                .where(Order.message_id == callback.message.message_id)
+                .values(status=OrderStatus.SENDING,message_id=x.message_id)
+        )
+
+        await session.execute(stmt)
+        await session.commit()
+        await state.set_state(OrderSteps.making_order)
+        await state.update_data(cart=[])
+
+    except Exception as e:
+        await callback.answer(f"Ошибка при отправке: {e}", show_alert=True)
+
+    await callback.answer()
 @dp.callback_query(F.data.startswith("order_done_"))
 async def admin_done(callback: types.CallbackQuery,session:AsyncSession):
     user_id = int(callback.data.split("_")[2])
@@ -123,10 +328,9 @@ async def admin_cancel(callback: types.CallbackQuery,session:AsyncSession):
 
 
 @dp.callback_query(F.data == "confirm_order")
-async def confirm_order(callback: types.CallbackQuery, state: FSMContext,session:AsyncSession):
+async def confirm_order(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
     data = await state.get_data()
     lang = data.get("user_lang", "ru")
-
 
     category = data.get("product")
     product = data.get("selected_product")
@@ -135,32 +339,31 @@ async def confirm_order(callback: types.CallbackQuery, state: FSMContext,session
     cart = data.get("cart")
 
 
-    result_text=calculate_total(category=category,lang=lang,product=product,dist=dist,quantity=quantity,cart=cart,is_manager=True)
-    try:
-        x=await callback.bot.send_message(
-            chat_id=GROUP_ID,
-            text=result_text,
-            reply_markup=get_admin_order_keyboard(user_id=callback.from_user.id),
-            parse_mode="Markdown"
-        )
+
+    result_text = calculate_total(
+        category=category, lang=lang, product=product,
+        dist=dist, quantity=quantity, cart=cart
+    )
+    await state.update_data(
+        last_msg_id=callback.message.message_id,
+    )
 
 
-        msg = "✅ Заявка отправлена! Менеджер свяжется с вами." if lang == "ru" else "✅ Arizangiz yuborildi! Menajer bog'lanadi."
-        await callback.message.edit_text(msg)
 
-        stmt = (
-            update(Order)
-                .where(Order.message_id == callback.message.message_id)
-                .values(status=OrderStatus.SENDING,message_id=x.message_id)
-        )
+    prompt = "Введите ваше имя👤:" if lang == "ru" else "Ismingizni kiriting👤:"
+    await callback.message.edit_text(result_text,parse_mode="HTML")
 
-        await session.execute(stmt)
-        await session.commit()
 
-    except Exception as e:
-        await callback.answer(f"Ошибка при отправке: {e}", show_alert=True)
+    # stmt = (
+    #     update(Order)
+    #         .where(Order.message_id == callback.message.message_id)
+    #         .values(order_text=result_text, status=OrderStatus.CALCULATION)
+    # )
 
-    await callback.answer()
+
+    await state.set_state(OrderSteps.choosing_name)
+    await callback.message.answer(prompt)
+
 
 
 
@@ -175,9 +378,10 @@ async def cancel_order(callback: types.CallbackQuery, state: FSMContext, session
     )
     await session.execute(stmt)
     await session.commit()
+    await state.update_data(cart=[])
 
     # 2. Очищаем состояние FSM
-    await state.clear()
+    await state.set_state(OrderSteps.making_order)
 
     # 3. Удаляем само сообщение в Telegram
     try:
@@ -186,7 +390,7 @@ async def cancel_order(callback: types.CallbackQuery, state: FSMContext, session
         # На случай, если сообщение уже удалено или прошло более 48 часов
         print(f"Ошибка удаления сообщения: {e}")
 
-    # 4. Уведомляем пользователя
+
     await callback.answer("Отменено / Bekor qilindi")
 
 @dp.callback_query(F.data == "calculate_total")
@@ -201,13 +405,14 @@ async def final_calculation(callback: types.CallbackQuery, state: FSMContext,ses
 
 
 
+
     result_text=calculate_total(category=category,lang=lang,product=product,dist=dist,quantity=quantity,cart=cart)
 
 
 
 
 
-    await callback.message.edit_text(result_text, reply_markup=get_final_order_keyboard(lang))
+    await callback.message.edit_text(result_text, reply_markup=get_final_order_keyboard(lang),parse_mode="HTML")
     current_msg_id = callback.message.message_id
 
 
@@ -415,10 +620,10 @@ async def process_beton_mark(message: types.Message, state: FSMContext):
     lang = user_data.get("user_lang", "ru")
     category = user_data.get("product")
 
-    # Get configuration for this category
+
     config = CATEGORIES_CONFIG.get(category)
 
-    # DRY LOGIC: Check if this category needs distance
+
     if config.get("has_distance"):
         await state.set_state(OrderSteps.entering_distance)
         text = making_order_text(lang, category,message.text)  # Specific text for distance
@@ -440,7 +645,7 @@ async def set_product_category(message: types.Message, state: FSMContext):
 
 
 
-    if "Бетон" in choice or "Beton" in choice:
+    if "Товарный бетон" in choice or "Tayyor beton" in choice:
         await state.update_data(product="beton")
         await state.set_state(OrderSteps.making_order)
 
@@ -448,7 +653,7 @@ async def set_product_category(message: types.Message, state: FSMContext):
         kb = get_beton_keyboard(lang)
 
 
-    elif "ФБС" in choice or "FBS" in choice:
+    elif "Фундаментальные блоки" in choice or "FBS" in choice:
         await state.update_data(product="fbs")
         await state.set_state(OrderSteps.making_order)
 
@@ -457,14 +662,14 @@ async def set_product_category(message: types.Message, state: FSMContext):
 
 
 
-    elif "Лотки" in choice or "Lotoklar" in choice:
+    elif "Лотки 6м" in choice or "Lotoklar" in choice:
         await state.update_data(product="lotok")
         await state.set_state(OrderSteps.quantity_order)
         text = get_quantity_text(lang)
         kb=None
 
 
-    elif "Плиты перекрытия" in choice or "Plitalar" in choice:
+    elif "Плиты перекрытия ПБ" in choice or "Qavat plitalari" in choice:
         await state.update_data(product="plita")
         text = "🏗 **Выберите ширину плиты:**" if lang == "ru" else "🏗 **Plita kengligini tanlang:**"
         await state.set_state(OrderSteps.making_order)
@@ -475,8 +680,7 @@ async def set_product_category(message: types.Message, state: FSMContext):
 
 
     else:
-        error_text = "Пожалуйста, выберите категорию из меню 👇" if lang == "ru" else "Iltimos, menyudan tanlang 👇"
-        await message.answer(error_text)
+        await message.answer(error_message(lang),reply_markup=get_cat_menu(lang))
         return
 
 
@@ -509,26 +713,27 @@ async def set_categories(message: types.Message, state: FSMContext):
 @dp.message(OrderSteps.choosing_language)
 async def set_language(message: types.Message,state: FSMContext):
     user_data = await state.get_data()
-    lang = user_data.get("user_lang")
+    lang = user_data.get("user_lang","ru")
 
 
     #await choosing_language(message)
     if "Русский" in message.text:
         lang = "ru"
         await message.answer("Установлен русский язык. Добро пожаловать! 👋",reply_markup=get_main_menu_kb(lang))
-    else:
+    elif "O'zbek tili" in message.text:
         lang = "uz"
-
         await message.answer("O'zbek tili tanlandi. Xush kelibsiz! 👋",reply_markup=get_main_menu_kb(lang))
-
+    else:
+        await message.answer(error_message(lang),reply_markup=get_lang_kb())
+        return
     await state.set_state(OrderSteps.main_menu)
     await state.update_data(user_lang=lang)
 
 
-@dp.message(F.text.in_(["📋 Мои заявки", "📋 Mening buyurtmalarim"]))
+@dp.message(F.text.in_(["🧾Мои заявки", "🧾 Mening buyurtmalarim"]))
 async def show_my_orders(message: types.Message,state: FSMContext, session: AsyncSession):
-    # 1. Запрос в базу: ищем заказы пользователя со статусом SENDING
-    # Сортируем по дате, чтобы новые были сверху
+
+
     query = (
         select(Order)
             .where(
@@ -565,18 +770,6 @@ async def show_my_orders(message: types.Message,state: FSMContext, session: Asyn
     await state.set_state(OrderSteps.main_menu)
 
 
-@dp.message(Command("help"))
-async def send_help(message: types.Message):
-    help_text = (
-        "<b>🦾 Главное меню команд:</b>\n\n"
-        "🚀 /start — Запустить бота и обновить данные\n"
-        "✅ /готово — Отметить продукцию как выполненную\n"
-        "📋 /список — Посмотреть актуальный список заказов\n"
-        "🆘 /помощь — Вызвать эту инструкцию\n\n"
-        "<i>Просто выберите нужную команду или введите её вручную.</i>"
-    )
-
-    await message.answer(help_text, parse_mode="HTML")
 
 
 
@@ -587,6 +780,10 @@ async def send_help(message: types.Message):
     #                          reply_markup=get_cat_menu(lang))
 
     #elif current_state == OrderSteps.
+
+
+
+
 
 
 
@@ -613,74 +810,6 @@ async def cmd_start(message: types.Message, state: FSMContext, session: AsyncSes
     )
     await state.set_state(OrderSteps.choosing_language)
 
-
-@dp.message(Command("list"))
-async def cmd_list(message: types.Message, session: AsyncSession):
-
-    result = await session.execute(select(func.count(User.id)))
-    count = result.scalar()
-
-    await message.answer(
-        f"👥 Всего зарегистрировано пользователей: <b>{count}</b>",
-        parse_mode="HTML"
-    )
-
-
-@dp.message(Command("send"))
-async def cmd_send_all(message: types.Message, session: AsyncSession):
-
-    text_to_send = message.text.replace("/send", "").strip()
-
-    if not text_to_send:
-        await message.answer("❌ Введите текст рассылки после команды. Пример: <code>/send Привет!</code>")
-        return
-
-    # 3. Берем всех юзеров из БД
-    result = await session.execute(select(User.telegram_id))
-    users = result.scalars().all()
-
-    count = 0
-    blocked = 0
-
-    await message.answer(f"🚀 Рассылка началась для {len(users)} пользователей...")
-
-    # 4. Цикл рассылки
-    for user_id in users:
-        try:
-            await bot.send_message(chat_id=user_id, text=text_to_send)
-            count += 1
-            # Небольшая пауза, чтобы Telegram не забанил за спам (Flood Limit)
-            await asyncio.sleep(0.05)
-
-        except TelegramForbiddenError:
-            # Юзер заблокировал бота
-            blocked += 1
-        except TelegramRetryAfter as e:
-            # Если превысили лимит сообщений в секунду
-            await asyncio.sleep(e.retry_after)
-            await bot.send_message(chat_id=user_id, text=text_to_send)
-            count += 1
-        except Exception as e:
-            print(f"Ошибка при отправке {user_id}: {e}")
-
-    await message.answer(
-        f"✅ <b>Рассылка завершена!</b>\n\n"
-        f"👤 Получили: {count}\n"
-        f"🚫 Заблокировали бота: {blocked}",
-        parse_mode="HTML"
-    )
-
-@dp.message(Command("готово"))
-async def cmd_start(message: types.Message):
-    await message.answer("готово!")
-
-@dp.message(Command("список"))
-async def cmd_start(message: types.Message):
-    await message.answer("список")
-
-@dp.message(Command("помощь"))
-async def cmd_start(message: types.Message):
-    await message.answer("помощь")
 
 
 async def main():

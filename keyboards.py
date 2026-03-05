@@ -2,13 +2,18 @@ from aiogram import Bot, Dispatcher, types,F
 from aiogram.filters.command import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder,ReplyKeyboardBuilder
 from price_list import *
-
+from datetime import datetime
 from aiogram.filters import BaseFilter
 
 # class NotBackButton(BaseFilter):
 #     async def __call__(self, message: types.Message) -> bool:
 #         # Возвращает True, если текста НЕТ в списке кнопок "Назад"
 #         return message.text not in ["⬅️ Назад", "⬅️ Orqaga"]
+
+def error_message(lang):
+    error_text = "Пожалуйста, выберите категорию из меню 👇" if lang == "ru" else "Iltimos, menyudan tanlang 👇"
+
+    return error_text
 def get_lang_kb():
     kb = [[types.KeyboardButton(text="🇷🇺 Русский"), types.KeyboardButton(text="🇺🇿 O'zbek tili")]]
     return types.ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
@@ -55,14 +60,14 @@ def get_fbs_keyboard(lang):
 def get_main_menu_kb(lang):
     if lang == "ru":
         btns = [
-            [types.KeyboardButton(text="🛍 Заказать")],
-            [types.KeyboardButton(text="📋 Мои заявки")], # Новая кнопка
+            [types.KeyboardButton(text="🏗 Заказать")],
+            [types.KeyboardButton(text="🧾Мои заявки")], # Новая кнопка
             [types.KeyboardButton(text="⬅️ Назад")]
         ]
     else:
         btns = [
-            [types.KeyboardButton(text="🛍 Buyurtma berish")],
-            [types.KeyboardButton(text="📋 Mening buyurtmalarim")], # Yangi tugma
+            [types.KeyboardButton(text="🏗 Buyurtma berish")],
+            [types.KeyboardButton(text="🧾 Mening buyurtmalarim")], # Yangi tugma
             [types.KeyboardButton(text="⬅️ Orqaga")]
         ]
     return types.ReplyKeyboardMarkup(keyboard=btns, resize_keyboard=True)
@@ -71,16 +76,16 @@ def get_main_menu_kb(lang):
 def get_cat_menu(lang):
     if lang == "ru":
         btns = [
-            [types.KeyboardButton(text="🏗 Бетон"), types.KeyboardButton(text="🧱 Плиты перекрытия")],
+            [types.KeyboardButton(text="Товарный бетон"), types.KeyboardButton(text="Плиты перекрытия ПБ")],
 
-            [types.KeyboardButton(text="🟦 ФБС (Блоки)"), types.KeyboardButton(text="〰️ Лотки")],
+            [types.KeyboardButton(text="Фундаментальные блоки"), types.KeyboardButton(text="Лотки 6м")],
 
             [types.KeyboardButton(text="⬅️ Назад")]
         ]
     else:
         btns = [
-            [types.KeyboardButton(text="🏗 Beton"), types.KeyboardButton(text="🧱 Plitalar")],
-            [types.KeyboardButton(text="🟦 FBS (Bloklar)"), types.KeyboardButton(text="〰️ Lotoklar")],
+            [types.KeyboardButton(text="Tayyor beton"), types.KeyboardButton(text="Qavat plitalari")],
+            [types.KeyboardButton(text="Bloklar"), types.KeyboardButton(text="Lotoklar 6m")],
             [types.KeyboardButton(text="⬅️ Orqaga")]
         ]
     return types.ReplyKeyboardMarkup(keyboard=btns, resize_keyboard=True)
@@ -104,6 +109,20 @@ def get_final_order_keyboard(lang):
     cancel_text = "❌ Отменить" if lang == "ru" else "❌ Bekor qilish"
 
     builder.button(text=confirm_text, callback_data="confirm_order")
+    builder.button(text=cancel_text, callback_data="cancel_order")
+
+    # Делаем кнопки в один ряд
+    builder.adjust(2)
+    return builder.as_markup()
+
+def get_final_order_keyboard_last(lang):
+    builder = InlineKeyboardBuilder()
+
+    # Кнопки действий
+    confirm_text = "✅ Отправить" if lang == "ru" else "✅ Yuborish"
+    cancel_text = "❌ Отменить" if lang == "ru" else "❌ Bekor qilish"
+
+    builder.button(text=confirm_text, callback_data="confirm_order_last")
     builder.button(text=cancel_text, callback_data="cancel_order")
 
     # Делаем кнопки в один ряд
@@ -265,174 +284,173 @@ def back_menu(category,lang):
     return keyboard
 
 
-def calculate_total(category, lang, quantity, product=None, dist=None, cart=None,is_manager=False):
+def calculate_total(
+    category,
+    lang,
+    quantity,
+    product=None,
+    dist=None,
+    cart=None,
+    phone=None,
+    name=None,
+    date=None,
+    is_manager=False
+):
+
     config = CATEGORIES_CONFIG.get(category, CATEGORIES_CONFIG["beton"])
     tovar_name = config[f"tovar_{lang}"]
     emoji = config["emoji"]
     label = config[f"label_{lang}"]
-    price_dict = config.get('price_dict', {})
+    price_dict = config.get("price_dict", {})
 
+    # форматирование чисел
+    def fmt(val):
+        return f"{int(val):,}".replace(",", " ")
 
+    # =========================
+    # ПЛИТЫ
+    # =========================
     if category == "plita":
+
         total_sum = 0
         items_lines = []
 
-        # Проходим по корзине и считаем каждую позицию
         for item in cart:
-            p_name = item['product']
-            p_qty = int(item['quantity'])
-            dist=item['distance']
+            p_name = item["product"]
+            p_qty = int(item["quantity"])
+            p_dist = item["distance"]
 
-            p_price = calculate_price_plita(p_name,dist)
-            subtotal = p_price *p_qty
+            p_price = calculate_price_plita(p_name, p_dist)
+
+            subtotal = p_price * p_qty
             total_sum += subtotal
 
-            p_price_fmt = f"{p_price:,}".replace(",", " ")
-            items_lines.append(f"🔹 {p_name} - {dist} м\n   {p_qty} шт. x {p_price_fmt} = {f'{subtotal:,}'.replace(',', ' ')} сум")
+            items_lines.append(
+                f"🔹 {p_name} ({p_dist} м)\n"
+                f"   {p_qty} шт. x {fmt(p_price)} = {fmt(subtotal)} сум"
+            )
 
         items_text = "\n".join(items_lines)
-        p_tot_formatted = f"{total_sum:,}".replace(",", " ")
+        p_tot_formatted = fmt(total_sum)
 
-        if lang == "ru":
-            result_text = (
-                f"📊 **Итоговый расчет (Плиты):**\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"{items_text}\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"✨ **ИТОГО К ОПЛАТЕ: {p_tot_formatted} сум**"
-            )
-        else:
-            result_text = (
-                f"📊 **Yakuniy hisob (Plitalar):**\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"{items_text}\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"✨ **JAMI TO'LOV: {p_tot_formatted} so'm**"
-            )
+        result_text = (
+            f"📊 <b>{'Итоговый расчет' if lang == 'ru' else 'Yakuniy hisob'} (Плиты):</b>\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"{items_text}\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"✨ <b>{'ИТОГО' if lang == 'ru' else 'JAMI'}: {p_tot_formatted} {'сум' if lang == 'ru' else 'so`m'}</b>"
+        )
 
-    # --- ТВОЯ ЛОГИКА ДЛЯ FBS ---
-    elif category == "fbs":
-        price_material = price_dict.get(product, 0)
-        total_sum = quantity * price_material
-        p_mat_formatted = f"{price_material:,}".replace(",", " ")
-        p_tot_formatted = f"{total_sum:,}".replace(",", " ")
-        if lang == "ru":
-            result_text = (
-                f"📊 **Итоговый расчет:**\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"{emoji} **Категория:** {category.upper()}\n"
-                f"🏗 **{label}:** {product}\n"
-                f"🔢 **Количество:** {quantity_or_unit(lang, category, quantity)}\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"💵 Цена за ед.: {p_mat_formatted} сум\n"
-                f"✨ **ИТОГО К ОПЛАТЕ: {p_tot_formatted} сум**"
-            )
-        else:
-            result_text = (
-                f"📊 **Yakuniy hisob:**\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"{emoji} **Kategoriya:** {category.upper()}\n"
-                f"🏗 **{label}:** {product}\n"
-                f"🔢 **Miqdori:** {quantity_or_unit(lang, category, quantity)}\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"💵 Dona narxi: {p_mat_formatted} so'm\n"
-                f"✨ **JAMI TO'LOV: {p_tot_formatted} so'm**"
-            )
+    # =========================
+    # БЕТОН / FBS / ЛОТОК
+    # =========================
+    else:
 
-    # --- ТВОЯ ЛОГИКА ДЛЯ БЕТОНА ---
-    elif category == "beton":
-        price_material = price_dict.get(product, 0)
-        if dist <= distance_from:
-            current_delivery = price_beton
+        if category == "lotok":
+            price_material = price_dict
         else:
-            extra_km = dist - distance_from
-            current_delivery = price_beton + (extra_km * price_distance)
+            price_material = price_dict.get(product, 0)
+
+        current_delivery = 0
+
+        if category == "beton" and dist is not None:
+            if dist <= distance_from:
+                current_delivery = price_beton
+            else:
+                current_delivery = price_beton + (
+                    (dist - distance_from) * price_distance
+                )
 
         total_sum = quantity * (price_material + current_delivery)
-        p_mat_formatted = f"{price_material:,}".replace(",", " ")
-        p_del_formatted = f"{current_delivery:,}".replace(",", " ")
-        p_tot_formatted = f"{total_sum:,}".replace(",", " ")
 
-        if lang == "ru":
-            result_text = (
-                f"📊 **Итоговый расчет:**\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"{emoji} **Категория:** {category.upper()}\n"
-                f"🏗 **{label}:** {product}\n"
-                f"🔢 **Количество:** {quantity_or_unit(lang, category, quantity)}\n"
-                f"📍 **Дистанция:** {dist} км\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"💵 Цена за ед.: {p_mat_formatted} сум\n"
-                f"🚛 Доставка: {p_del_formatted} сум\n\n"
-                f"✨ **ИТОГО К ОПЛАТЕ: {p_tot_formatted} сум**"
-            )
-        else:
-            result_text = (
-                f"📊 **Yakuniy hisob:**\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"{emoji} **Kategoriya:** {category.upper()}\n"
-                f"🏗 **{label}:** {product}\n"
-                f"🔢 **Miqdori:** {quantity_or_unit(lang, category, quantity)}\n"
-                f"📍 **Masofa:** {dist} km\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"💵 Dona narxi: {p_mat_formatted} so'm\n"
-                f"🚛 Yetkazib berish: {p_del_formatted} so'm\n\n"
-                f"✨ **JAMI TO'LOV: {p_tot_formatted} so'm**"
-            )
+        p_mat_formatted = fmt(price_material)
+        p_del_formatted = fmt(current_delivery)
+        p_tot_formatted = fmt(total_sum)
 
-    # --- ТВОЯ ЛОГИКА ДЛЯ ЛОТКОВ ---
-    elif category == "lotok":
-        price_material = price_dict  # Здесь в конфиге лотков число напрямую
-        total_sum = quantity * price_material
-        p_mat_formatted = f"{price_material:,}".replace(",", " ")
-        p_tot_formatted = f"{total_sum:,}".replace(",", " ")
-        if lang == "ru":
-            result_text = (
-                f"📊 **Итоговый расчет:**\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"{emoji} **Категория:** {category.upper()}\n"
-                f"🔢 **Количество:** {quantity_or_unit(lang, category, quantity)}\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"💵 Цена за ед.: {p_mat_formatted} сум\n"
-                f"✨ **ИТОГО К ОПЛАТЕ: {p_tot_formatted} сум**"
-            )
-        else:
-            result_text = (
-                f"📊 **Yakuniy hisob:**\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"{emoji} **Kategoriya:** {category.upper()}\n"
-                f"🔢 **Miqdori:** {quantity_or_unit(lang, category, quantity)}\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"💵 Dona narxi: {p_mat_formatted} so'm\n"
-                f"✨ **JAMI TO'LOV: {p_tot_formatted} so'm**"
-            )
+        res_header = "Итоговый расчет" if lang == "ru" else "Yakuniy hisob"
+
+        dist_line = (
+            f"📍 <b>{'Дистанция' if lang == 'ru' else 'Masofa'}:</b> {dist} км\n"
+            if category == "beton"
+            else ""
+        )
+
+        del_line = (
+            f"🚛 <b>{'Доставка' if lang == 'ru' else 'Yetkazish'}:</b> {p_del_formatted} сум\n"
+            if category == "beton"
+            else ""
+        )
+
+        result_text = (
+            f"📊 <b>{res_header}:</b>\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"{emoji} <b>{'Категория' if lang == 'ru' else 'Kategoriya'}:</b> {tovar_name}\n"
+            f"🏗 <b>{label}:</b> {product}\n"
+            f"🔢 <b>{'Количество' if lang == 'ru' else 'Miqdor'}:</b> {quantity_or_unit(lang, category, quantity)}\n"
+            f"{dist_line}"
+            f"━━━━━━━━━━━━━━\n"
+            f"💵 <b>{'Цена' if lang == 'ru' else 'Narx'}:</b> {p_mat_formatted} сум\n"
+            f"{del_line}"
+            f"✨ <b>{'ИТОГО' if lang == 'ru' else 'JAMI'}: {p_tot_formatted} сум</b>"
+        )
+
+    # =========================
+    # ДОБАВЛЯЕМ ДАННЫЕ КЛИЕНТА (RU / UZ)
+    # =========================
+
+    extra_lines = []
+
+    if name:
+        extra_lines.append(
+            f"👤 <b>{'Заказчик' if lang == 'ru' else 'Buyurtmachi'}:</b> {name}"
+        )
+
+    if phone:
+        extra_lines.append(
+            f"📞 <b>{'Тел' if lang == 'ru' else 'Telefon'}:</b> {phone}"
+        )
+
+    if date:
+        extra_lines.append(
+            f"🚛 <b>{'Дата Отгрузки' if lang == 'ru' else 'Yuklash sanasi'}:</b> {date}"
+        )
+
+    if extra_lines:
+        result_text += "\n\n" + "\n".join(extra_lines)
+
+    # =========================
+    # СООБЩЕНИЕ МЕНЕДЖЕРУ
+    # =========================
 
     if is_manager:
-        if category == "plita" :
-            result_text = (
-                f"🚀 **НОВЫЙ ЗАКАЗ!**\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"{emoji} **Категория:** {category.upper()}\n"
-                f"{items_text}\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"✨ **ИТОГО К ОПЛАТЕ: {p_tot_formatted} сум**"
-            )
 
+        header = (
+            f"🚀 <b>НОВЫЙ ЗАКАЗ!</b>\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"👤 <b>Заказчик:</b> {name}\n"
+            f"📞 <b>Тел:</b> {phone}\n\n"
+            f"🏗 <b>Категория:</b> {tovar_name}\n"
+        )
+
+        footer = (
+            f"\n━━━━━━━━━━━━━━\n"
+            f"✨ <b>ИТОГО К ОПЛАТЕ: {p_tot_formatted} сум</b>\n\n"
+            f"🚛 <b>Дата Отгрузки:</b> {date}"
+        )
+
+        if category == "plita":
+            result_text = f"{header}{items_text}{footer}"
         else:
-            result_text = (
-                f"🚀 **НОВЫЙ ЗАКАЗ!**\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"{emoji} **Категория:** {category.upper()}\n"
-                f"🔢 **Количество:** {quantity_or_unit(lang, category, quantity)}\n"
-                f"━━━━━━━━━━━━━━\n"
-                f"💵 Цена за ед.: {p_mat_formatted} сум\n"
-                f"✨ **ИТОГО К ОПЛАТЕ: {p_tot_formatted} сум**"
+
+            body = (
+                f"🔹 <b>{product}:</b>\n"
+                f"   {quantity} шт. x {p_mat_formatted} = {p_tot_formatted} сум\n"
             )
 
+            if category == "beton":
+                body += f"🚛 Доставка ({dist} км): {p_del_formatted} сум\n"
 
-
-
-
+            result_text = f"{header}{body}{footer}"
 
     return result_text
 

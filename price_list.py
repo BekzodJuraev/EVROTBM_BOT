@@ -1,3 +1,5 @@
+
+
 beton = {
     "M100-A": 419265,
     "M150-A": 431970,
@@ -47,8 +49,8 @@ def calculate_price_plita(product,distance):
 
 CATEGORIES_CONFIG = {
     "fbs": {
-        "tovar_ru": "ФБС Блоки",
-        "tovar_uz": "FBS Bloklar",
+        "tovar_ru": "Фундаментальные блоки",
+        "tovar_uz": "Bloklar",
         "unit_ru": "шт",
         "unit_uz": "dona",
         "emoji": "🧱",
@@ -58,8 +60,8 @@ CATEGORIES_CONFIG = {
         "price_dict": fbs_prices,
     },
     "beton": {
-        "tovar_ru": "Бетон",
-        "tovar_uz": "Beton",
+        "tovar_ru": "Товарный бетон",
+        "tovar_uz": "Tayyor beton",
         "unit_ru": "м³",
         "unit_uz": "m³",
         "emoji": "💧",
@@ -69,8 +71,8 @@ CATEGORIES_CONFIG = {
         "price_dict": beton
     },
     "lotok": {
-        "tovar_ru": "Лотки",
-        "tovar_uz": "Lotoklar",
+        "tovar_ru": "Лотки 6м",
+        "tovar_uz": "Lotoklar 6m",
         "unit_ru": "шт",
         "unit_uz": "dona",
         "emoji": "〰️",
@@ -80,8 +82,8 @@ CATEGORIES_CONFIG = {
         "price_dict": 810000  # Заменил на переменную словаря
     },
     "plita": {
-        "tovar_ru": "Плиты перекрытия",
-        "tovar_uz": "Plitalar",
+        "tovar_ru": "Плиты перекрытия ПБ",
+        "tovar_uz": "Qavat plitalari",
         "unit_ru": "шт",
         "unit_uz": "dona",
         "emoji": "🏗",
