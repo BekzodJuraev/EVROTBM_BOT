@@ -54,6 +54,7 @@ class OrderSteps(StatesGroup):
     choosing_name=State()
     choosing_phone_number=State()
     choosing_date_ready=State()
+    choosing_nasos=State()
 
 @dp.message(Command("list"))
 async def cmd_list(message: types.Message, session: AsyncSession,state: FSMContext):
@@ -192,6 +193,57 @@ async def process_phone(message: types.Message, state: FSMContext):
         await message.answer(f"❌ Ошибка: {error_msg}\nПопробуйте еще раз в формате +998XXXXXXXXX")
 
 
+@dp.message(OrderSteps.choosing_nasos)
+async def process_nasos_message(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("user_lang", "ru")
+    category = data.get("product")
+    product = data.get("selected_product")
+    dist = int(data.get("distance", 0))
+    quantity = int(data.get("quantity", 0))
+    cart = data.get("cart")
+    phone = data.get("customer_phone")
+    name = data.get("customer_name")
+    msg_id = data.get("last_msg_id")
+    withoutcal = data.get("withoutcal")
+    date_ready=data.get("date_ready")
+
+    if message.text == "✅ Да":
+        nasos=True
+        choice_text = "Вы выбрали: <b>Да</b>" if lang == "ru" else "Siz tanladingiz: <b>Ha</b>"
+
+
+    else:
+
+        nasos = False
+        choice_text = "Вы выбрали: <b>Нет</b>" if lang == "ru" else "Siz tanladingiz: <b>Yo'q</b>"
+
+    await state.update_data(nasos=nasos)
+
+
+
+    result_text = calculate_total(category=category, lang=lang, product=product, dist=dist, quantity=quantity,
+                                  cart=cart, phone=phone, name=name, date=date_ready, withoutcal=withoutcal,nasos=nasos)
+
+    await message.bot.edit_message_text(
+        chat_id=message.chat.id,
+        message_id=msg_id,
+        text=result_text,
+        parse_mode="HTML",
+        reply_markup=get_final_order_keyboard_last(lang)
+    )
+
+    await message.delete()
+    await message.answer(choice_text,reply_markup=get_beton_keyboard(lang),parse_mode="HTML")
+    await state.set_state(OrderSteps.main_category)
+
+
+
+
+
+
+
+
 
 @dp.message(OrderSteps.choosing_date_ready)
 async def process_date(message: types.Message, state: FSMContext):
@@ -210,6 +262,7 @@ async def process_date(message: types.Message, state: FSMContext):
         await message.bot.delete_message(message.chat.id, data["msg_to_delete"])
 
     try:
+        await state.update_data(date_ready=message.text)
 
 
 
@@ -218,22 +271,33 @@ async def process_date(message: types.Message, state: FSMContext):
         # date=chosen_date.strftime("%d.%m.%Y")
 
 
-
-        await state.update_data(date_ready=message.text)
-        result_text = calculate_total(category=category, lang=lang, product=product, dist=dist, quantity=quantity,
-                                      cart=cart,phone=phone,name=name,date=message.text,withoutcal=withoutcal)
-
-        await message.bot.edit_message_text(
-            chat_id=message.chat.id,
-            message_id=msg_id,
-            text=result_text,
-            parse_mode="HTML",
-            reply_markup=get_final_order_keyboard_last(lang)
-        )
+        if category == "beton":
+            await message.answer(
+                MESSAGES["ask_nasos"][lang],
+                reply_markup=get_yes_no_keyboard(lang),
+                parse_mode="HTML"
+            )
+            await state.set_state(OrderSteps.choosing_nasos)
 
 
-        await message.delete()
-        await state.set_state(OrderSteps.main_category)
+
+        else:
+
+            result_text = calculate_total(category=category, lang=lang, product=product, dist=dist, quantity=quantity,
+                                          cart=cart, phone=phone, name=name, date=message.text, withoutcal=withoutcal)
+
+            await message.bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=msg_id,
+                text=result_text,
+                parse_mode="HTML",
+                reply_markup=get_final_order_keyboard_last(lang)
+            )
+
+            await message.delete()
+            await state.set_state(OrderSteps.main_category)
+
+
 
 
 
@@ -264,6 +328,7 @@ async def confirm_order(callback: types.CallbackQuery, state: FSMContext,session
     name = data.get("customer_name")
     date = data.get("date_ready")
     withoutcal=data.get("withoutcal")
+    nasos = data.get("nasos")
 
 
 
@@ -272,7 +337,7 @@ async def confirm_order(callback: types.CallbackQuery, state: FSMContext,session
 
 
     result_text=calculate_total(category=category, lang=lang, product=product, dist=dist, quantity=quantity,
-                    cart=cart, phone=phone, name=name, date=date,is_manager=True,withoutcal=withoutcal)
+                    cart=cart, phone=phone, name=name, date=date,is_manager=True,withoutcal=withoutcal,nasos=nasos)
     try:
         x=await callback.bot.send_message(
             chat_id=GROUP_ID,
@@ -541,6 +606,7 @@ async def handle_cart_options(message: types.Message, state: FSMContext,session:
     choice = message.text
     category = user_data.get("product")
     distance=user_data.get("distance")
+    category = user_data.get("product")
 
     # 1. Если пользователь хочет добавить еще одну плиту
     if choice in ["➕ Добавить еще", "➕ Yana qo'shish"]:
@@ -549,7 +615,10 @@ async def handle_cart_options(message: types.Message, state: FSMContext,session:
 
 
         text = "🏗 **Выберите ширину для следующей плиты:**" if lang == "ru" else "🏗 **Keyingi plita kengligini tanlang:**"
-        await message.answer(text, reply_markup=get_plita_width_kb(lang))
+        if category == "plita":
+            await message.answer(text, reply_markup=get_plita_width_kb(lang))
+        else:
+            await message.answer(text, reply_markup=get_fbs_keyboard(lang))
 
 
 
@@ -570,7 +639,10 @@ async def handle_cart_options(message: types.Message, state: FSMContext,session:
         summary, text_info = get_summary_text(category=category,lang=lang,cart=cart,distance=distance)
         sent_message = await message.answer(
             summary,
-            reply_markup=get_calculate_inline(lang)
+            reply_markup=get_calculate_inline(lang),
+            parse_mode="HTML"
+
+
         )
 
 
@@ -621,7 +693,7 @@ async def process_quantity_order(message: types.Message, state: FSMContext,sessi
 
 
 
-    if category == "plita":
+    if category == "plita" or category == "fbs" :
         cart = user_data.get("cart", [])
         await state.update_data(cart=cart)
 
@@ -635,7 +707,7 @@ async def process_quantity_order(message: types.Message, state: FSMContext,sessi
 
 
 
-        text, keyboard=plita_loop(lang)
+        text, keyboard=plita_loop(category,lang)
         await message.answer(text, reply_markup=keyboard)
 
         await state.set_state(OrderSteps.choosing_plita_width)
@@ -647,7 +719,9 @@ async def process_quantity_order(message: types.Message, state: FSMContext,sessi
 
         sent_message = await message.answer(
             summary,
-            reply_markup=get_calculate_inline(lang)
+            reply_markup=get_calculate_inline(lang),
+            parse_mode="HTML"
+
         )
 
 
@@ -690,15 +764,19 @@ async def process_beton_mark(message: types.Message, state: FSMContext):
     config = CATEGORIES_CONFIG.get(category)
 
 
-    if config.get("has_distance"):
-        await state.set_state(OrderSteps.entering_distance)
-        text = making_order_text(lang, category,message.text)  # Specific text for distance
-    else:
-        # For FBS, Lotok, and anything else without distance
-        await state.set_state(OrderSteps.quantity_order)
-        text = get_quantity_text(lang)  # Generic "Enter quantity" text
+    try:
+        if config.get("has_distance"):
+            await state.set_state(OrderSteps.entering_distance)
+            text = making_order_text(lang, category, message.text)  # Specific text for distance
+        else:
+            # For FBS, Lotok, and anything else without distance
+            await state.set_state(OrderSteps.quantity_order)
+            text = get_quantity_text(lang)  # Generic "Enter quantity" text
 
-    await message.answer(text, reply_markup=types.ReplyKeyboardRemove())
+        await message.answer(text, reply_markup=types.ReplyKeyboardRemove())
+    except:
+        await state.set_state(OrderSteps.making_order)
+
 
 
 @dp.message(OrderSteps.main_category)
