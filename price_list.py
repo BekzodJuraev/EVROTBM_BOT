@@ -1,4 +1,21 @@
-
+MESSAGES = {
+    "ask_name": {
+        "ru": "👤 <b>Введите ваше имя:</b>",
+        "uz": "👤 <b>Ismingizni kiriting:</b>"
+    },
+    "ask_phone": {
+        "ru": "📱 <b>Введите ваш номер телефона:</b>\n<i>Например: +998901234567</i>",
+        "uz": "📱 <b>Telefon raqamingizni kiriting:</b>\n<i>Masalan: +998901234567</i>"
+    },
+    "ask_date": {
+        "ru": "📅 <b>Дата отгрузки (ДД.ММ.ГГГГ):</b>\n<i>Пример: 10.03.2026</i>",
+        "uz": "📅 <b>Yuklash sanasi (KK.OO.YYYY):</b>\n<i>Masalan: 10.03.2026</i>"
+    },
+    "error_date": {
+        "ru": "❌ Неверный формат даты!",
+        "uz": "❌ Sana formati noto'g'ri!"
+    }
+}
 
 beton = {
     "M100-A": 419265,

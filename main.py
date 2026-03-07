@@ -26,7 +26,19 @@ from schemas import DateValidation,UserContact
 from pydantic import ValidationError
 dp = Dispatcher()
 dp.message
+async def ask_step_data(message: types.Message, state: FSMContext, step_key: str):
+    # Получаем язык из state
+    data = await state.get_data()
+    lang = data.get("user_lang", "ru")
 
+    # Берем текст из нашего словаря
+    text = MESSAGES.get(step_key, {}).get(lang, "Error: text not found")
+
+    # Отправляем сообщение
+    sent_msg = await message.answer(text, parse_mode="HTML")
+
+    # Сохраняем ID, чтобы удалить его в следующем хендлере
+    await state.update_data(msg_to_delete=sent_msg.message_id)
 
 
 from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
@@ -149,22 +161,28 @@ async def go_back(message: types.Message, state: FSMContext):
 
 @dp.message(OrderSteps.choosing_name)
 async def process_name(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    if data.get("msg_to_delete"):
+        await message.bot.delete_message(message.chat.id, data["msg_to_delete"])
+
     await state.update_data(customer_name=message.text)
-    await message.answer("Введите ваш номер телефона 📱:")
+    await ask_step_data(message, state, "ask_phone")
     await state.set_state(OrderSteps.choosing_phone_number)
     await message.delete()
 
 
-# 2. Спрашиваем телефон
+
 @dp.message(OrderSteps.choosing_phone_number)
 async def process_phone(message: types.Message, state: FSMContext):
     try:
-
+        data = await state.get_data()
+        if data.get("msg_to_delete"):
+            await message.bot.delete_message(message.chat.id, data["msg_to_delete"])
         UserContact(phone=message.text)
 
 
         await state.update_data(customer_phone=message.text)
-        await message.answer("Дата Отгрузки (ДД.ММ.ГГГГ):")
+        await ask_step_data(message, state, "ask_date")
         await state.set_state(OrderSteps.choosing_date_ready)
         await message.delete()
 
@@ -187,19 +205,23 @@ async def process_date(message: types.Message, state: FSMContext):
     phone=data.get("customer_phone")
     name = data.get("customer_name")
     msg_id = data.get("last_msg_id")
+    withoutcal = data.get("withoutcal")
+    if data.get("msg_to_delete"):
+        await message.bot.delete_message(message.chat.id, data["msg_to_delete"])
+
     try:
 
 
 
-        valid_data = DateValidation(input_date=message.text)
-        chosen_date = valid_data.input_date
-        date=chosen_date.strftime("%d.%m.%Y")
+        # valid_data = DateValidation(input_date=message.text)
+        # chosen_date = valid_data.input_date
+        # date=chosen_date.strftime("%d.%m.%Y")
 
 
 
-        await state.update_data(date_ready=date)
+        await state.update_data(date_ready=message.text)
         result_text = calculate_total(category=category, lang=lang, product=product, dist=dist, quantity=quantity,
-                                      cart=cart,phone=phone,name=name,date=date)
+                                      cart=cart,phone=phone,name=name,date=message.text,withoutcal=withoutcal)
 
         await message.bot.edit_message_text(
             chat_id=message.chat.id,
@@ -209,7 +231,9 @@ async def process_date(message: types.Message, state: FSMContext):
             reply_markup=get_final_order_keyboard_last(lang)
         )
 
+
         await message.delete()
+        await state.set_state(OrderSteps.main_category)
 
 
 
@@ -239,6 +263,8 @@ async def confirm_order(callback: types.CallbackQuery, state: FSMContext,session
     phone=data.get("customer_phone")
     name = data.get("customer_name")
     date = data.get("date_ready")
+    withoutcal=data.get("withoutcal")
+
 
 
 
@@ -246,7 +272,7 @@ async def confirm_order(callback: types.CallbackQuery, state: FSMContext,session
 
 
     result_text=calculate_total(category=category, lang=lang, product=product, dist=dist, quantity=quantity,
-                    cart=cart, phone=phone, name=name, date=date,is_manager=True)
+                    cart=cart, phone=phone, name=name, date=date,is_manager=True,withoutcal=withoutcal)
     try:
         x=await callback.bot.send_message(
             chat_id=GROUP_ID,
@@ -267,8 +293,9 @@ async def confirm_order(callback: types.CallbackQuery, state: FSMContext,session
 
         await session.execute(stmt)
         await session.commit()
+        await state.clear()
         await state.set_state(OrderSteps.making_order)
-        await state.update_data(cart=[])
+
 
     except Exception as e:
         await callback.answer(f"Ошибка при отправке: {e}", show_alert=True)
@@ -350,7 +377,7 @@ async def confirm_order(callback: types.CallbackQuery, state: FSMContext, sessio
 
 
 
-    prompt = "Введите ваше имя👤:" if lang == "ru" else "Ismingizni kiriting👤:"
+
     await callback.message.edit_text(result_text,parse_mode="HTML")
 
 
@@ -362,8 +389,47 @@ async def confirm_order(callback: types.CallbackQuery, state: FSMContext, sessio
 
 
     await state.set_state(OrderSteps.choosing_name)
-    await callback.message.answer(prompt)
+    await ask_step_data(callback.message, state, "ask_name")
 
+
+@dp.callback_query(F.data == "confirm_order_withoutcal")
+async def confirm_order(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
+    data = await state.get_data()
+    lang = data.get("user_lang", "ru")
+
+    category = data.get("product")
+    product = data.get("selected_product")
+    dist = data.get("distance", 0)
+    quantity = int(data.get("quantity", 0))
+    cart = data.get("cart")
+
+    await state.update_data(withoutcal=True)
+    result_text = calculate_total(
+        category=category, lang=lang, product=product,
+        dist=dist, quantity=quantity, cart=cart,withoutcal=True
+    )
+
+
+    await state.update_data(
+        last_msg_id=callback.message.message_id,
+    )
+    await callback.message.edit_text(result_text, parse_mode="HTML")
+
+
+
+
+
+
+
+    # stmt = (
+    #     update(Order)
+    #         .where(Order.message_id == callback.message.message_id)
+    #         .values(order_text=result_text, status=OrderStatus.CALCULATION)
+    # )
+
+
+    await state.set_state(OrderSteps.choosing_name)
+    await ask_step_data(callback.message, state, "ask_name")
 
 
 
@@ -539,7 +605,7 @@ async def process_quantity_order(message: types.Message, state: FSMContext,sessi
 
     await message.delete()
 
-    # 1. Проверка числа
+
     try:
         quantity = int(message.text.strip())
         await state.update_data(quantity=quantity)
@@ -548,7 +614,7 @@ async def process_quantity_order(message: types.Message, state: FSMContext,sessi
         await message.answer(error_text)
         return
 
-    # 2. Получаем текущую корзину или создаем новую, если её нет
+
 
 
 
@@ -653,7 +719,7 @@ async def set_product_category(message: types.Message, state: FSMContext):
         kb = get_beton_keyboard(lang)
 
 
-    elif "Фундаментальные блоки" in choice or "FBS" in choice:
+    elif "Фундаментальные блоки" in choice or "Bloklar" in choice:
         await state.update_data(product="fbs")
         await state.set_state(OrderSteps.making_order)
 
@@ -731,42 +797,53 @@ async def set_language(message: types.Message,state: FSMContext):
 
 
 @dp.message(F.text.in_(["🧾Мои заявки", "🧾 Mening buyurtmalarim"]))
-async def show_my_orders(message: types.Message,state: FSMContext, session: AsyncSession):
-
-
+async def show_my_orders(message: types.Message, state: FSMContext, session: AsyncSession):
+    # 1. Получаем заказы
     query = (
         select(Order)
             .where(
             Order.user_id == message.from_user.id,
-            Order.status == OrderStatus.SENDING  # Или "sending", если у тебя строки
+            Order.status == OrderStatus.SENDING
         )
             .order_by(Order.created_at.desc())
+            .limit(10)  # Рекомендую добавить лимит, чтобы не спамить
     )
 
     result = await session.execute(query)
     orders = result.scalars().all()
 
-    # 2. Проверяем, есть ли заказы
+    # Определение языка (лучше брать из state)
+    data = await state.get_data()
+    lang = data.get("user_lang", "ru")
+
     if not orders:
-        text = {
-            "ru": "📭 У вас нет активных заявок.",
-            "uz": "📭 Sizda faol buyurtmalar yo'q."
-        }
-        # Тут можно добавить логику определения языка пользователя
-        await message.answer(text["ru"])
+        text = "📭 У вас нет активных заявок." if lang == "ru" else "📭 Sizda faol buyurtmalar yo'q."
+        await message.answer(text)
         return
 
-    # 3. Формируем список заявок
-    response_text = "📋 <b>Ваши активные заявки:</b>\n\n"
+    # Заголовок
+    header = "📋 <b>Ваши активные заявки:</b>" if lang == "ru" else "📋 <b>Sizning faol buyurtmalaringiz:</b>"
+    await message.answer(header, parse_mode="HTML")
 
+    # 2. Отправляем каждый заказ отдельным сообщением
     for i, order in enumerate(orders, 1):
-        # Ограничим текст заявки, если он слишком длинный, или выведем как есть
         date_str = order.created_at.strftime("%d.%m.%Y %H:%M")
-        response_text += f"<b>Заказ №{i}</b> ({date_str}):\n{order.order_text}\n"
-        response_text += "⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯\n"
 
-    # 4. Отправляем результат
-    await message.answer(response_text, parse_mode="HTML")
+        # Формируем текст одного конкретного заказа
+        order_info = (
+            f"<b>Заказ №{i}</b> ({date_str}):\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"{order.order_text}\n"
+        )
+
+        # Отправляем сразу. Если текст одного заказа > 4096 (вряд ли),
+        # то ошибка не вылетит на общую кучу.
+        try:
+            await message.answer(order_info, parse_mode="HTML")
+        except Exception:
+            # Если даже один заказ слишком длинный, обрезаем его
+            await message.answer(order_info[:4000] + "...", parse_mode="HTML")
+
     await state.set_state(OrderSteps.main_menu)
 
 

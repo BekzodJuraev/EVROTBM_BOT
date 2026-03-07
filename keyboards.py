@@ -57,6 +57,8 @@ def get_fbs_keyboard(lang):
 
     return types.ReplyKeyboardMarkup(keyboard=btns, resize_keyboard=True)
 
+
+
 def get_main_menu_kb(lang):
     if lang == "ru":
         btns = [
@@ -91,28 +93,33 @@ def get_cat_menu(lang):
     return types.ReplyKeyboardMarkup(keyboard=btns, resize_keyboard=True)
 
 
-
-
 def get_calculate_inline(lang):
     builder = InlineKeyboardBuilder()
-    text = "🧮 Рассчитать стоимость" if lang == "ru" else "🧮 Hisoblash"
-    # callback_data поможет нам отловить нажатие именно этой кнопки
-    builder.button(text=text, callback_data="calculate_total")
+
+    # Кнопка расчета
+    calc_text = "🧮 Рассчитать стоимость" if lang == "ru" else "🧮 Hisoblash"
+    builder.button(text=calc_text, callback_data="calculate_total")
+
+    # Кнопка Заказать
+    order_text = "✅ Заказать" if lang == "ru" else "✅ Buyurtma berish"
+    builder.button(text=order_text, callback_data="confirm_order_withoutcal")
+
+    builder.adjust(1)  # Кнопки друг под другом
     return builder.as_markup()
 
 
 def get_final_order_keyboard(lang):
     builder = InlineKeyboardBuilder()
 
-    # Кнопки действий
+
     confirm_text = "✅ Заказать" if lang == "ru" else "✅ Buyurtma berish"
     cancel_text = "❌ Отменить" if lang == "ru" else "❌ Bekor qilish"
 
     builder.button(text=confirm_text, callback_data="confirm_order")
     builder.button(text=cancel_text, callback_data="cancel_order")
 
-    # Делаем кнопки в один ряд
-    builder.adjust(2)
+
+    builder.adjust()
     return builder.as_markup()
 
 def get_final_order_keyboard_last(lang):
@@ -285,174 +292,85 @@ def back_menu(category,lang):
 
 
 def calculate_total(
-    category,
-    lang,
-    quantity,
-    product=None,
-    dist=None,
-    cart=None,
-    phone=None,
-    name=None,
-    date=None,
-    is_manager=False
+        category, lang, quantity,
+        product=None, dist=None, cart=None,
+        phone=None, name=None, date=None,
+        is_manager=False, withoutcal=False
 ):
-
     config = CATEGORIES_CONFIG.get(category, CATEGORIES_CONFIG["beton"])
     tovar_name = config[f"tovar_{lang}"]
     emoji = config["emoji"]
     label = config[f"label_{lang}"]
     price_dict = config.get("price_dict", {})
 
-    # форматирование чисел
     def fmt(val):
         return f"{int(val):,}".replace(",", " ")
 
-    # =========================
-    # ПЛИТЫ
-    # =========================
-    if category == "plita":
-
-        total_sum = 0
-        items_lines = []
-
-        for item in cart:
-            p_name = item["product"]
-            p_qty = int(item["quantity"])
-            p_dist = item["distance"]
-
-            p_price = calculate_price_plita(p_name, p_dist)
-
-            subtotal = p_price * p_qty
-            total_sum += subtotal
-
-            items_lines.append(
-                f"🔹 {p_name} ({p_dist} м)\n"
-                f"   {p_qty} шт. x {fmt(p_price)} = {fmt(subtotal)} сум"
-            )
-
-        items_text = "\n".join(items_lines)
-        p_tot_formatted = fmt(total_sum)
-
-        result_text = (
-            f"📊 <b>{'Итоговый расчет' if lang == 'ru' else 'Yakuniy hisob'} (Плиты):</b>\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"{items_text}\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"✨ <b>{'ИТОГО' if lang == 'ru' else 'JAMI'}: {p_tot_formatted} {'сум' if lang == 'ru' else 'so`m'}</b>"
-        )
-
-    # =========================
-    # БЕТОН / FBS / ЛОТОК
-    # =========================
-    else:
-
-        if category == "lotok":
-            price_material = price_dict
-        else:
-            price_material = price_dict.get(product, 0)
-
-        current_delivery = 0
-
-        if category == "beton" and dist is not None:
-            if dist <= distance_from:
-                current_delivery = price_beton
-            else:
-                current_delivery = price_beton + (
-                    (dist - distance_from) * price_distance
-                )
-
-        total_sum = quantity * (price_material + current_delivery)
-
-        p_mat_formatted = fmt(price_material)
-        p_del_formatted = fmt(current_delivery)
-        p_tot_formatted = fmt(total_sum)
-
-        res_header = "Итоговый расчет" if lang == "ru" else "Yakuniy hisob"
-
-        dist_line = (
-            f"📍 <b>{'Дистанция' if lang == 'ru' else 'Masofa'}:</b> {dist} км\n"
-            if category == "beton"
-            else ""
-        )
-
-        del_line = (
-            f"🚛 <b>{'Доставка' if lang == 'ru' else 'Yetkazish'}:</b> {p_del_formatted} сум\n"
-            if category == "beton"
-            else ""
-        )
-
-        result_text = (
-            f"📊 <b>{res_header}:</b>\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"{emoji} <b>{'Категория' if lang == 'ru' else 'Kategoriya'}:</b> {tovar_name}\n"
-            f"🏗 <b>{label}:</b> {product}\n"
-            f"🔢 <b>{'Количество' if lang == 'ru' else 'Miqdor'}:</b> {quantity_or_unit(lang, category, quantity)}\n"
-            f"{dist_line}"
-            f"━━━━━━━━━━━━━━\n"
-            f"💵 <b>{'Цена' if lang == 'ru' else 'Narx'}:</b> {p_mat_formatted} сум\n"
-            f"{del_line}"
-            f"✨ <b>{'ИТОГО' if lang == 'ru' else 'JAMI'}: {p_tot_formatted} сум</b>"
-        )
-
-    # =========================
-    # ДОБАВЛЯЕМ ДАННЫЕ КЛИЕНТА (RU / UZ)
-    # =========================
-
-    extra_lines = []
-
-    if name:
-        extra_lines.append(
-            f"👤 <b>{'Заказчик' if lang == 'ru' else 'Buyurtmachi'}:</b> {name}"
-        )
-
-    if phone:
-        extra_lines.append(
-            f"📞 <b>{'Тел' if lang == 'ru' else 'Telefon'}:</b> {phone}"
-        )
-
-    if date:
-        extra_lines.append(
-            f"🚛 <b>{'Дата Отгрузки' if lang == 'ru' else 'Yuklash sanasi'}:</b> {date}"
-        )
-
-    if extra_lines:
-        result_text += "\n\n" + "\n".join(extra_lines)
-
-    # =========================
-    # СООБЩЕНИЕ МЕНЕДЖЕРУ
-    # =========================
-
+    # 1. ЗАГОЛОВОК
     if is_manager:
-
-        header = (
-            f"🚀 <b>НОВЫЙ ЗАКАЗ!</b>\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"👤 <b>Заказчик:</b> {name}\n"
-            f"📞 <b>Тел:</b> {phone}\n\n"
-            f"🏗 <b>Категория:</b> {tovar_name}\n"
-        )
-
-        footer = (
-            f"\n━━━━━━━━━━━━━━\n"
-            f"✨ <b>ИТОГО К ОПЛАТЕ: {p_tot_formatted} сум</b>\n\n"
-            f"🚛 <b>Дата Отгрузки:</b> {date}"
-        )
-
-        if category == "plita":
-            result_text = f"{header}{items_text}{footer}"
+        res_header = "🚀 <b>НОВЫЙ ЗАКАЗ!</b>\n━━━━━━━━━━━━━━"
+    else:
+        if withoutcal:
+            res_header = f"📝 <b>{'Оформление заказа' if lang == 'ru' else 'Buyurtmani rasmiylashtirish'}:</b>\n━━━━━━━━━━━━━━"
         else:
+            res_header = f"📊 <b>{'Итоговый расчет' if lang == 'ru' else 'Yakuniy hisob'}:</b>\n━━━━━━━━━━━━━━"
 
-            body = (
-                f"🔹 <b>{product}:</b>\n"
-                f"   {quantity} шт. x {p_mat_formatted} = {p_tot_formatted} сум\n"
-            )
+    # 2. ДАННЫЕ КЛИЕНТА (ВЕРХНИЙ БЛОК)
+    client_top = ""
+    if name or phone:
+        name_line = f"👤 <b>{'Заказчик' if lang == 'ru' else 'Buyurtmachi'}:</b> {name}\n" if name else ""
+        phone_line = f"📞 <b>{'Тел' if lang == 'ru' else 'Telefon'}:</b> {phone}\n" if phone else ""
+        client_top = f"{name_line}{phone_line}\n"
 
-            if category == "beton":
-                body += f"🚛 Доставка ({dist} км): {p_del_formatted} сум\n"
+    # 3. ИНФОРМАЦИЯ О ТОВАРЕ
+    product_info = f"{emoji} <b>{'Категория' if lang == 'ru' else 'Kategoriya'}:</b> {tovar_name}\n"
 
-            result_text = f"{header}{body}{footer}"
+    if category == "plita" and cart:
+        items_list = [f"🔹 {item['product']} ({item['distance']} м) — {item['quantity']} шт." for item in cart]
+        product_info += "\n".join(items_list)
+    elif product:
+        product_info += f"🏗 <b>{label}:</b> {product}\n"
+        product_info += f"🔢 <b>{'Количество' if lang == 'ru' else 'Miqdor'}:</b> {quantity_or_unit(lang, category, quantity)}\n"
+        if category == "beton" and dist:
+            product_info += f"📍 <b>{'Дистанция' if lang == 'ru' else 'Masofa'}:</b> {dist} км\n"
 
-    return result_text
+    # 4. БЛОК КАЛЬКУЛЯЦИИ (Цены)
+    calc_block = ""
+    if not withoutcal:
+        total_sum = 0
+        if category == "plita":
+            total_sum = sum(calculate_price_plita(i['product'], i['distance']) * int(i['quantity']) for i in cart)
+        else:
+            price_mat = price_dict if category == "lotok" else price_dict.get(product, 0)
+            delivery = 0
+            if category == "beton" and dist:
+                delivery = price_beton if dist <= distance_from else price_beton + (
+                            (dist - distance_from) * price_distance)
+            total_sum = quantity * (price_mat + delivery)
+
+            p_mat_fmt = fmt(price_mat)
+            p_del_fmt = fmt(delivery)
+
+            calc_block = f"━━━━━━━━━━━━━━\n"
+            if category != "plita": calc_block += f"💵 <b>Цена:</b> {p_mat_fmt} сум\n"
+            if category == "beton": calc_block += f"🚛 <b>Доставка:</b> {p_del_fmt} сум\n"
+
+        calc_block += f"✨ <b>ИТОГО: {fmt(total_sum)} сум</b>"
+
+    # 5. ДАННЫЕ КЛИЕНТА (НИЖНИЙ БЛОК - ТОЛЬКО ДАТА)
+    footer_date = ""
+    if date:
+        footer_date = f"\n\n🚛 <b>{'Дата Отгрузки' if lang == 'ru' else 'Yuklash sanasi'}:</b> {date}"
+
+    # ФИНАЛЬНАЯ СБОРКА
+    # Собираем всё по порядку: Заголовок -> Клиент (имя/тел) -> Товар -> Расчет (если есть) -> Дата
+    result = f"{res_header}\n{client_top}{product_info}{calc_block}{footer_date}"
+
+    # Если расчет отключен, добавим разделитель перед датой для красоты
+    if withoutcal and not calc_block:
+        result = f"{res_header}\n{client_top}{product_info}\n━━━━━━━━━━━━━━{footer_date}"
+
+    return result
 
 def plita_loop(lang):
     text = ("✅ Плита добавлена в список!\n\n"
